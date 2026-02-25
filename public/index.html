@@ -36,8 +36,8 @@
       </div>
     </div>
 
-    <!-- Right: weather -->
-    <div class="weather-block" id="weatherBlock">
+    <!-- Right: weather (tap to expand) -->
+    <div class="weather-block" id="weatherBlock" role="button" title="Tap for weekly forecast">
       <div class="weather-current">
         <div class="weather-temp-row">
           <div class="weather-temp" id="weatherTemp">--°</div>
@@ -45,22 +45,56 @@
         </div>
         <div class="weather-label" id="weatherLabel">--</div>
       </div>
-      <div class="weather-forecast" id="weatherForecast">
-        <!-- populated by app.js -->
-      </div>
+      <div class="weather-forecast" id="weatherForecast"></div>
     </div>
 
   </header>
 
   <!-- ── Bottom events panel ───────────────────── -->
   <section class="events-panel" id="eventsPanel">
-    <div class="events-inner" id="eventsInner">
-      <!-- populated by app.js -->
-    </div>
+    <div class="events-inner" id="eventsInner"></div>
   </section>
+
+  <!-- ── Floating calendar button ─────────────── -->
+  <button class="fab-calendar" id="fabCalendar" title="Month view">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="3"/>
+      <path d="M16 2v4M8 2v4M3 10h18"/>
+      <rect x="7" y="14" width="3" height="3" rx="0.5" fill="currentColor" stroke="none"/>
+      <rect x="14" y="14" width="3" height="3" rx="0.5" fill="currentColor" stroke="none"/>
+    </svg>
+  </button>
 
   <!-- ── Photo counter ────────────────────────── -->
   <div class="photo-counter" id="photoCounter"></div>
+
+  <!-- ── Weather detail modal ──────────────────── -->
+  <div class="modal-backdrop" id="weatherBackdrop" hidden>
+    <div class="modal weather-modal" id="weatherModal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="weatherModalTitle">Weekly Forecast</h2>
+        <button class="modal-close" id="weatherClose">✕</button>
+      </div>
+      <div class="forecast-rows" id="forecastRows"></div>
+    </div>
+  </div>
+
+  <!-- ── Calendar month modal ───────────────────── -->
+  <div class="modal-backdrop" id="calendarBackdrop" hidden>
+    <div class="modal calendar-modal" id="calendarModal">
+      <div class="modal-header">
+        <button class="month-nav" id="monthPrev">&#8249;</button>
+        <h2 class="modal-title" id="calMonthTitle">March 2026</h2>
+        <button class="month-nav" id="monthNext">&#8250;</button>
+        <button class="modal-close" id="calendarClose">✕</button>
+      </div>
+      <div class="cal-dow-header">
+        <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="cal-day-panel" id="calDayPanel"></div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

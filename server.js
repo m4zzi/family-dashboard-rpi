@@ -134,7 +134,7 @@ app.get('/api/weather', async (req, res) => {
       temperature_unit: 'fahrenheit',
       wind_speed_unit: 'mph',
       precipitation_unit: 'inch',
-      forecast_days: 4,
+      forecast_days: 8,
     });
 
     const r = await fetch(url);
@@ -167,8 +167,10 @@ app.get('/api/weather', async (req, res) => {
 
 // ── Calendar (iCal feeds) ─────────────────────────────────────────────────────
 app.get('/api/calendar', async (req, res) => {
-  const cached = getCached('calendar');
-  if (cached) return res.json(cached);
+  const days = Math.min(parseInt(req.query.days) || config.calendarDays, 120);
+  const cacheKey = `calendar_${days}`;
+  const cached = _cache[cacheKey];
+  if (cached && Date.now() - cached.ts < config.cache.calendar) return res.json(cached.data);
 
   if (config.calendars.length === 0) {
     return res.json({ events: [], unconfigured: true });
@@ -177,7 +179,7 @@ app.get('/api/calendar', async (req, res) => {
   try {
     const IcalExpander = (await import('ical-expander')).default;
     const now     = new Date();
-    const endDate = new Date(now.getTime() + config.calendarDays * 24 * 60 * 60 * 1000);
+    const endDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
     const allEvents = [];
 
     for (const cal of config.calendars) {
@@ -217,7 +219,7 @@ app.get('/api/calendar', async (req, res) => {
     });
 
     const data = { events: allEvents, unconfigured: false };
-    setCache('calendar', data);
+    _cache[cacheKey] = { data, ts: Date.now() };
     res.json(data);
   } catch (err) {
     console.error('Calendar error:', err.message);
