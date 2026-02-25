@@ -242,9 +242,14 @@ function buildHourlyStrip(date) {
       <div class="hour-precip">${precip}</div>`;
     strip.appendChild(card);
 
-    // Scroll current hour into view after render
-    if (isNow) requestAnimationFrame(() => card.scrollIntoView({ inline: 'center', behavior: 'smooth' }));
+    // Scroll current hour into centre of the strip — only scroll the strip
+    // horizontally; never use scrollIntoView which also scrolls parent modal
+    if (isNow) requestAnimationFrame(() => {
+      strip.scrollLeft = card.offsetLeft - strip.offsetWidth / 2 + card.offsetWidth / 2;
+    });
   }
+
+  attachDragScroll(strip, { axis: 'x', isolated: true });  // isolated: stops propagation to modal's vertical handler
   return strip;
 }
 
@@ -484,3 +489,68 @@ calendarBackdrop.addEventListener('click', e => { if (e.target === calendarBackd
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeWeatherModal(); closeCalendarModal(); }
 });
+
+// ── Drag-scroll helper ────────────────────────────────────────────────────────
+// CSS native scroll is unreliable on Chromium/Linux kiosk — Pointer Events API
+// handles mouse drag and touch in one path, no text-selection fights.
+//
+// axis:'x'  — setPointerCapture so drag works even if pointer leaves element.
+//             Pass isolated:true to stop pointerdown bubbling (prevents a
+//             parent vertical handler from stealing the pointer capture).
+// axis:'y'  — uses document-level move/up listeners instead of setPointerCapture
+//             so child click handlers (e.g. forecast rows) still fire normally.
+function attachDragScroll(el, { axis = 'x', snapChildSelector = null, isolated = false } = {}) {
+  const horiz = axis === 'x';
+  let startPos    = null;
+  let startScroll = 0;
+  let moved       = false;
+
+  el.addEventListener('pointerdown', e => {
+    if (isolated) e.stopPropagation();   // prevent parent handler stealing capture
+    startPos    = horiz ? e.clientX : e.clientY;
+    startScroll = horiz ? el.scrollLeft : el.scrollTop;
+    moved       = false;
+    if (horiz) {
+      el.setPointerCapture(e.pointerId);
+      el.style.scrollSnapType = 'none';
+    }
+  }, { passive: true });
+
+  // Vertical uses document so pointer can drift outside modal without losing drag
+  const moveTarget = horiz ? el : document;
+  const upTarget   = horiz ? el : document;
+
+  moveTarget.addEventListener('pointermove', e => {
+    if (startPos === null) return;
+    const delta = startPos - (horiz ? e.clientX : e.clientY);
+    if (Math.abs(delta) > 6) moved = true;
+    if (horiz) el.scrollLeft = startScroll + delta;
+    else       el.scrollTop  = startScroll + delta;
+  }, { passive: true });
+
+  function onEnd() {
+    if (startPos === null) return;
+    if (horiz) {
+      el.style.scrollSnapType = '';
+      if (moved && snapChildSelector) {
+        const child = el.querySelector(snapChildSelector);
+        const gap   = child ? parseFloat(getComputedStyle(el).gap) || 0 : 0;
+        const colW  = child ? child.offsetWidth + gap : 1;
+        el.scrollTo({ left: Math.round(el.scrollLeft / colW) * colW, behavior: 'smooth' });
+      }
+      // Absorb the ghost click that fires after a horizontal drag on some platforms
+      if (moved) el.addEventListener('click', e => e.stopPropagation(), { capture: true, once: true });
+    }
+    startPos = null;
+  }
+
+  upTarget.addEventListener('pointerup',     onEnd);
+  upTarget.addEventListener('pointercancel', onEnd);
+}
+
+// Events strip — horizontal, snap to day columns
+attachDragScroll(document.getElementById('eventsInner'), { axis: 'x', snapChildSelector: '.day-col' });
+
+// Modals — vertical free-scroll (document listeners, no capture = child clicks still work)
+attachDragScroll(document.getElementById('weatherModal'),  { axis: 'y' });
+attachDragScroll(document.getElementById('calendarModal'), { axis: 'y' });

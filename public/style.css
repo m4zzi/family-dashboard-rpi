@@ -26,6 +26,8 @@ html, body {
   color: var(--white);
   background: #0c0906;
   -webkit-font-smoothing: antialiased;
+  user-select: none;           /* no text selection anywhere on the display */
+  -webkit-user-select: none;
 }
 
 /* ── Photo background ─────────────────────────────────────────────────── */
@@ -249,7 +251,7 @@ html, body {
   z-index: 10;
   padding: 0 3.4rem 2.6rem;
   max-height: 44vh;
-  overflow: hidden;
+  overflow: clip;  /* clip without creating a scroll container — lets child scroll events through */
   animation: revealUp 1s 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -261,8 +263,11 @@ html, body {
   scrollbar-width: none;
   padding-bottom: 2px;
   scroll-snap-type: x mandatory;
-  scroll-behavior: smooth;
+  /* scroll-behavior: smooth removed — conflicts with scroll-snap in Chromium, causes locking */
+  touch-action: pan-x pinch-zoom;
   -webkit-overflow-scrolling: touch;
+  user-select: none;          /* prevent text-selection on drag — lets browser treat drag as scroll */
+  -webkit-user-select: none;
 }
 .events-inner::-webkit-scrollbar { display: none; }
 
@@ -433,8 +438,10 @@ html, body {
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding: 4vh 1rem 4vh;
+  overflow-y: auto;
   animation: backdropIn 0.22s ease;
 }
 .modal-backdrop[hidden] { display: none; }
