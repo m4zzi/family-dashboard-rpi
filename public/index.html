@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Family Display</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Photo background layers (cross-fade) -->
+  <div class="photo-bg" id="photoBg1"></div>
+  <div class="photo-bg" id="photoBg2"></div>
+
+  <!-- Cinematic overlays -->
+  <div class="vignette"></div>
+  <div class="gradient-top"></div>
+  <div class="gradient-bottom"></div>
+
+  <!-- ── Top bar ───────────────────────────────── -->
+  <header class="top-bar">
+
+    <!-- Left: clock + divider + date stacked -->
+    <div class="left-block">
+      <div class="clock-block">
+        <div class="time" id="time">--:--</div>
+        <div class="ampm" id="ampm">--</div>
+      </div>
+      <div class="clock-date-divider"></div>
+      <div class="date-block">
+        <div class="date-day" id="dateDay">--</div>
+        <div class="date-full" id="dateFull">------</div>
+      </div>
+    </div>
+
+    <!-- Right: weather -->
+    <div class="weather-block" id="weatherBlock">
+      <div class="weather-current">
+        <div class="weather-temp-row">
+          <div class="weather-temp" id="weatherTemp">--°</div>
+          <div class="weather-icon" id="weatherIcon">--</div>
+        </div>
+        <div class="weather-label" id="weatherLabel">--</div>
+      </div>
+      <div class="weather-forecast" id="weatherForecast">
+        <!-- populated by app.js -->
+      </div>
+    </div>
+
+  </header>
+
+  <!-- ── Bottom events panel ───────────────────── -->
+  <section class="events-panel" id="eventsPanel">
+    <div class="events-inner" id="eventsInner">
+      <!-- populated by app.js -->
+    </div>
+  </section>
+
+  <!-- ── Photo counter ────────────────────────── -->
+  <div class="photo-counter" id="photoCounter"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

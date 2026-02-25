@@ -1,0 +1,7 @@
+node_modules/
+
+# Contains private calendar URLs and iCloud token — never commit
+config.js
+
+# Claude Code local settings
+.claude/

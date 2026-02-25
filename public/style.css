@@ -1,0 +1,385 @@
+/* ── Reset & base ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Warm-tinted glass — not cold black */
+  --glass-bg:     rgba(12, 9, 6, 0.60);
+  --glass-border: rgba(255, 248, 230, 0.10);
+  --blur:         blur(28px);
+  --radius:       18px;
+
+  /* Warm whites — not clinical pure white */
+  --white:        #FFFBF4;
+  --white-dim:    rgba(255, 248, 230, 0.62);
+  --white-faint:  rgba(255, 248, 230, 0.35);
+
+  /* Amber accent — warm, domestic, not corporate blue */
+  --accent:       #F0A500;
+
+  --shadow-text:  0 2px 24px rgba(0, 0, 0, 0.80);
+}
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--white);
+  background: #0c0906;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Photo background ─────────────────────────────────────────────────── */
+.photo-bg {
+  position: fixed;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  transition: opacity 2.8s ease-in-out;  /* cinematic, not snappy */
+  will-change: opacity;
+}
+#photoBg1 { z-index: 0; opacity: 1; }
+#photoBg2 { z-index: 1; opacity: 0; }
+
+/* ── Cinematic overlays ───────────────────────────────────────────────── */
+
+/* Radial vignette: edges darker, center open — like a lens */
+.vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  background: radial-gradient(ellipse at 50% 42%,
+    transparent 30%,
+    rgba(0, 0, 0, 0.55) 100%);
+  pointer-events: none;
+}
+
+/* Directional gradients for text zones */
+.gradient-top {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 48%;
+  background: linear-gradient(to bottom,
+    rgba(0, 0, 0, 0.75) 0%,
+    rgba(0, 0, 0, 0.25) 65%,
+    transparent 100%);
+  z-index: 3;
+  pointer-events: none;
+}
+.gradient-bottom {
+  position: fixed;
+  inset: auto 0 0 0;
+  height: 52%;
+  background: linear-gradient(to top,
+    rgba(0, 0, 0, 0.88) 0%,
+    rgba(0, 0, 0, 0.50) 48%,
+    transparent 100%);
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* ── Entrance animation ───────────────────────────────────────────────── */
+@keyframes revealUp {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Top bar ──────────────────────────────────────────────────────────── */
+.top-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 2.6rem 3.4rem 0;
+}
+
+/* ── Left block: clock + date stacked ────────────────────────────────── */
+.left-block {
+  display: flex;
+  flex-direction: column;
+  animation: revealUp 1s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.clock-block {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  line-height: 1;
+}
+
+/* The hero — Cormorant Garamond gives it soul Inter never could */
+.time {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: clamp(6.5rem, 13.5vw, 11.5rem);
+  font-weight: 300;
+  letter-spacing: -5px;
+  text-shadow: var(--shadow-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.ampm {
+  font-family: 'DM Sans', sans-serif;
+  font-size: clamp(1rem, 2vw, 1.8rem);
+  font-weight: 300;
+  letter-spacing: 0.08em;
+  opacity: 0.55;
+  align-self: flex-end;
+  padding-bottom: 1.1rem;
+  text-shadow: var(--shadow-text);
+}
+
+/* Amber accent line — breaks the monotony, anchors the date */
+.clock-date-divider {
+  width: 2.8rem;
+  height: 1.5px;
+  background: var(--accent);
+  opacity: 0.80;
+  margin: 0.4rem 0 0.5rem;
+}
+
+.date-block {
+  line-height: 1.2;
+}
+.date-day {
+  font-size: clamp(1.4rem, 2.6vw, 2.2rem);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-shadow: var(--shadow-text);
+}
+.date-full {
+  font-size: clamp(0.85rem, 1.5vw, 1.2rem);
+  font-weight: 300;
+  color: var(--white-dim);
+  letter-spacing: 0.04em;
+  text-shadow: var(--shadow-text);
+}
+
+/* ── Weather — right anchor ───────────────────────────────────────────── */
+.weather-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.85rem;
+  animation: revealUp 1s 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.weather-current {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* Temp + icon side by side — temp is the visual anchor, not the icon */
+.weather-temp-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  line-height: 1;
+}
+
+.weather-temp {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: clamp(3rem, 6vw, 5.5rem);
+  font-weight: 300;
+  text-shadow: var(--shadow-text);
+}
+
+.weather-icon {
+  font-size: clamp(1.8rem, 3.2vw, 3rem);
+  line-height: 1;
+}
+
+.weather-label {
+  font-size: clamp(0.76rem, 1.3vw, 0.98rem);
+  font-weight: 300;
+  color: var(--white-dim);
+  letter-spacing: 0.02em;
+  text-shadow: var(--shadow-text);
+  margin-top: 0.1rem;
+}
+
+/* 3-day forecast strip */
+.weather-forecast {
+  display: flex;
+  gap: 0.45rem;
+}
+.forecast-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.12rem;
+  background: rgba(12, 9, 6, 0.48);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 0.5rem 0.75rem;
+  min-width: 3.8rem;
+}
+.forecast-day-name {
+  font-size: clamp(0.58rem, 1vw, 0.74rem);
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--white-dim);
+}
+.forecast-day-icon {
+  font-size: clamp(1rem, 1.7vw, 1.35rem);
+  line-height: 1.25;
+}
+.forecast-day-hi {
+  font-size: clamp(0.76rem, 1.2vw, 0.96rem);
+  font-weight: 500;
+}
+.forecast-day-lo {
+  font-size: clamp(0.64rem, 1vw, 0.80rem);
+  font-weight: 300;
+  color: var(--white-dim);
+}
+
+/* ── Events panel ─────────────────────────────────────────────────────── */
+.events-panel {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 10;
+  padding: 0 3.4rem 2.6rem;
+  max-height: 44vh;
+  overflow: hidden;
+  animation: revealUp 1s 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.events-inner {
+  display: flex;
+  gap: 1.1rem;
+  align-items: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.events-inner::-webkit-scrollbar { display: none; }
+
+/* Day column */
+.day-col {
+  flex: 0 0 auto;
+  min-width: min(340px, 30vw);
+  background: var(--glass-bg);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.3rem;
+}
+
+.day-label {
+  font-size: clamp(0.68rem, 1.15vw, 0.84rem);
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--white-faint);
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+/* Amber "Today" — warm, not cold blue */
+.day-label.today { color: var(--accent); }
+
+/* Event row: left-border accent strip instead of a dot */
+.event-item {
+  display: flex;
+  align-items: stretch;
+  padding: 0.52rem 0;
+  border-bottom: 1px solid rgba(255, 248, 230, 0.055);
+}
+.event-item:last-child { border-bottom: none; }
+
+/* The colored left bar — calendar color at a glance without dots cluttering the list */
+.event-accent {
+  width: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  margin-right: 0.9rem;
+  align-self: stretch;
+  min-height: 1.8rem;
+  opacity: 0.85;
+}
+
+.event-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Time sits above the title, smaller and dimmer — clear hierarchy */
+.event-time {
+  font-size: clamp(0.65rem, 1.1vw, 0.82rem);
+  font-weight: 400;
+  color: var(--white-faint);
+  line-height: 1;
+  margin-bottom: 0.22em;
+  letter-spacing: 0.02em;
+}
+.event-time.allday { font-style: italic; }
+
+/* Title is the primary text — reads from across the room */
+.event-title {
+  font-size: clamp(0.92rem, 1.7vw, 1.22rem);
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Empty / unconfigured states */
+.no-events {
+  color: var(--white-faint);
+  font-size: 0.95rem;
+  font-style: italic;
+  font-weight: 300;
+  padding: 0.3rem 0;
+}
+
+.cal-setup-hint {
+  flex: 0 0 auto;
+  background: var(--glass-bg);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 1.4rem 1.8rem;
+  max-width: 420px;
+  line-height: 1.6;
+}
+.cal-setup-hint h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--accent);
+}
+.cal-setup-hint p {
+  font-size: 0.85rem;
+  color: var(--white-dim);
+}
+.cal-setup-hint code {
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 0.8rem;
+}
+
+/* ── Photo counter dots ──────────────────────────────────────────────── */
+.photo-counter {
+  position: fixed;
+  bottom: 1rem;
+  right: 3.4rem;
+  z-index: 10;
+  display: flex;
+  gap: 5px;
+}
+.photo-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 248, 230, 0.25);
+  transition: background 0.4s;
+}
+.photo-dot.active { background: rgba(255, 248, 230, 0.80); }
