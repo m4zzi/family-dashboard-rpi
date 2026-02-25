@@ -5,10 +5,11 @@ const CALENDAR_REFRESH =  5 * 60_000;
 const CLOCK_TICK       = 1_000;
 
 // ── Shared state ──────────────────────────────────────────────────────────────
-let weatherData        = null;   // cached for weather modal
-let calendarAllEvents  = [];     // 90-day cache for month modal
-let calViewDate        = null;   // first-of-month being shown in calendar modal
-let calSelectedKey     = null;   // currently selected day key
+let weatherData        = null;
+let calendarAllEvents  = [];
+let calViewDate        = null;
+let calSelectedKey     = null;
+let expandedForecastDate = null;  // which day row has its hourly strip open
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtTime(isoString, allDay) {
@@ -19,6 +20,12 @@ function fmtTime(isoString, allDay) {
   h = h % 12 || 12;
   const m = String(d.getMinutes()).padStart(2, '0');
   return m === '00' ? `${h} ${ampm}` : `${h}:${m} ${ampm}`;
+}
+function fmtHour(h) {
+  if (h === 0)  return '12am';
+  if (h < 12)   return `${h}am`;
+  if (h === 12) return '12pm';
+  return `${h - 12}pm`;
 }
 function dayKey(isoString) {
   const d = new Date(isoString);
@@ -45,10 +52,8 @@ function updateClock() {
   const m = String(now.getMinutes()).padStart(2, '0');
   document.getElementById('time').textContent = `${h}:${m}`;
   document.getElementById('ampm').textContent = ampm;
-
   const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   document.getElementById('dateDay').textContent = days[now.getDay()];
-
   const months = ['January','February','March','April','May','June',
                   'July','August','September','October','November','December'];
   document.getElementById('dateFull').textContent =
@@ -61,9 +66,7 @@ updateClock();
 const bg1 = document.getElementById('photoBg1');
 const bg2 = document.getElementById('photoBg2');
 const counter = document.getElementById('photoCounter');
-
-let photos = [], photoIndex = 0;
-let activeBg = bg1, hiddenBg = bg2;
+let photos = [], photoIndex = 0, activeBg = bg1, hiddenBg = bg2;
 
 function preloadImage(url) {
   return new Promise(resolve => {
@@ -152,8 +155,7 @@ async function loadCalendar() {
     if (unconfigured) {
       container.innerHTML = `<div class="cal-setup-hint">
         <h3>Add your calendars</h3>
-        <p>Open <code>config.js</code> and add your iCal feed URLs to the
-        <code>calendars</code> array.</p></div>`;
+        <p>Open <code>config.js</code> and add your iCal feed URLs.</p></div>`;
       return;
     }
     if (events.length === 0) {
@@ -182,24 +184,19 @@ async function loadCalendar() {
       col.appendChild(label);
 
       for (const ev of dayEvents) {
-        const item   = document.createElement('div');
+        const item    = document.createElement('div');
         item.className = 'event-item';
-
-        const accent = document.createElement('div');
+        const accent  = document.createElement('div');
         accent.className = 'event-accent';
         accent.style.background = ev.color;
-
         const body    = document.createElement('div');
         body.className = 'event-body';
-
         const timeEl  = document.createElement('div');
         timeEl.className = 'event-time' + (ev.allDay ? ' allday' : '');
         timeEl.textContent = fmtTime(ev.start, ev.allDay);
-
         const titleEl = document.createElement('div');
         titleEl.className = 'event-title';
         titleEl.textContent = ev.title;
-
         body.append(timeEl, titleEl);
         item.append(accent, body);
         col.appendChild(item);
@@ -217,38 +214,113 @@ async function loadCalendar() {
 loadCalendar();
 setInterval(loadCalendar, CALENDAR_REFRESH);
 
+// ── Hourly strip builder ──────────────────────────────────────────────────────
+function buildHourlyStrip(date) {
+  const hours = weatherData?.hourlyByDay?.[date];
+  if (!hours || hours.length === 0) return null;
+
+  const nowHour   = new Date().getHours();
+  const todayKey  = localDateKey(new Date());
+  const isToday   = date === todayKey;
+
+  const strip = document.createElement('div');
+  strip.className = 'hourly-strip';
+
+  for (const h of hours) {
+    const card = document.createElement('div');
+    const isPast = isToday && h.hour < nowHour;
+    const isNow  = isToday && h.hour === nowHour;
+    card.className = 'hour-card'
+      + (isNow  ? ' is-now'  : '')
+      + (isPast ? ' is-past' : '');
+
+    const precip = h.precip > 10 ? `💧${h.precip}%` : '';
+    card.innerHTML = `
+      <div class="hour-label">${fmtHour(h.hour)}</div>
+      <div class="hour-icon">${h.icon}</div>
+      <div class="hour-temp">${h.temp}°</div>
+      <div class="hour-precip">${precip}</div>`;
+    strip.appendChild(card);
+
+    // Scroll current hour into view after render
+    if (isNow) requestAnimationFrame(() => card.scrollIntoView({ inline: 'center', behavior: 'smooth' }));
+  }
+  return strip;
+}
+
 // ── Weather modal ─────────────────────────────────────────────────────────────
 const weatherBackdrop = document.getElementById('weatherBackdrop');
+const DAY_NAMES_FULL  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
-function openWeatherModal() {
-  if (!weatherData) return;
+function buildForecastRow(day, index, isExpanded) {
+  const d       = new Date(day.date + 'T12:00:00');
+  const isToday = day.date === localDateKey(new Date());
+  const label   = isToday ? 'Today' : DAY_NAMES_FULL[d.getDay()];
+  const precip  = day.precip > 0 ? `💧 ${day.precip}% rain` : '';
 
-  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const todayKey = localDateKey(new Date());
+  const row = document.createElement('div');
+  row.className = 'forecast-row' + (isToday ? ' is-today' : '');
+  row.style.animationDelay = `${index * 0.055}s`;
+  row.dataset.date = day.date;
 
-  document.getElementById('weatherModalTitle').textContent =
-    `Weekly Forecast · ${weatherData.city}`;
-
-  document.getElementById('forecastRows').innerHTML = weatherData.daily.map(day => {
-    const d       = new Date(day.date + 'T12:00:00');
-    const isToday = day.date === todayKey;
-    const precip  = day.precip != null ? `💧 ${day.precip}%` : '';
-    return `<div class="forecast-row${isToday ? ' is-today' : ''}">
-      <div class="fr-day">${isToday ? 'Today' : dayNames[d.getDay()]}</div>
+  row.innerHTML = `
+    <div class="fr-main">
+      <div class="fr-day">${label}</div>
       <div class="fr-icon">${day.icon}</div>
-      <div class="fr-label">${day.label}</div>
-      <div class="fr-precip">${precip}</div>
+      <div class="fr-meta">
+        <div class="fr-label">${day.label}</div>
+        ${precip ? `<div class="fr-precip">${precip}</div>` : ''}
+      </div>
       <div class="fr-temps">
         <div class="fr-hi">${day.high}°</div>
         <div class="fr-lo">${day.low}°</div>
       </div>
     </div>`;
-  }).join('');
 
-  weatherBackdrop.hidden = false;
+  // Add hourly strip if this day is expanded
+  if (isExpanded) {
+    const strip = buildHourlyStrip(day.date);
+    if (strip) row.appendChild(strip);
+  }
+
+  // Toggle hourly on tap
+  row.addEventListener('click', () => {
+    if (expandedForecastDate === day.date) {
+      expandedForecastDate = null;
+    } else {
+      expandedForecastDate = day.date;
+    }
+    renderWeatherModal();
+  });
+
+  return row;
 }
 
-function closeWeatherModal() { weatherBackdrop.hidden = true; }
+function renderWeatherModal() {
+  document.getElementById('weatherModalTitle').textContent =
+    `Weekly Forecast · ${weatherData.city}`;
+
+  const container = document.getElementById('forecastRows');
+  container.innerHTML = '';
+
+  weatherData.daily.forEach((day, i) => {
+    const isExpanded = expandedForecastDate === day.date;
+    container.appendChild(buildForecastRow(day, i, isExpanded));
+  });
+}
+
+function openWeatherModal() {
+  if (!weatherData) return;
+  // Auto-expand today's hourly on first open
+  if (!expandedForecastDate) {
+    expandedForecastDate = weatherData.daily[0]?.date ?? null;
+  }
+  renderWeatherModal();
+  weatherBackdrop.hidden = false;
+}
+function closeWeatherModal() {
+  weatherBackdrop.hidden = true;
+}
 
 document.getElementById('weatherBlock').addEventListener('click', openWeatherModal);
 document.getElementById('weatherClose').addEventListener('click', e => { e.stopPropagation(); closeWeatherModal(); });
@@ -262,7 +334,6 @@ async function openCalendarModal() {
   calViewDate = new Date();
   calViewDate.setDate(1);
 
-  // Fetch 90 days if we don't have them yet (cached after first open)
   if (calendarAllEvents.length === 0) {
     try {
       const res = await fetch('/api/calendar?days=90');
@@ -272,28 +343,24 @@ async function openCalendarModal() {
       }
     } catch (err) { console.warn('Calendar modal fetch failed:', err.message); }
   }
-
-  renderCalendarMonth();
+  renderCalendarMonth('none');
 }
-
 function closeCalendarModal() {
   calendarBackdrop.hidden = true;
   calSelectedKey = null;
 }
 
-function renderCalendarMonth() {
+function renderCalendarMonth(direction) {
   const year  = calViewDate.getFullYear();
   const month = calViewDate.getMonth();
+  const MONTHS = ['January','February','March','April','May','June',
+                  'July','August','September','October','November','December'];
+  document.getElementById('calMonthTitle').textContent = `${MONTHS[month]} ${year}`;
 
-  const MONTH_NAMES = ['January','February','March','April','May','June',
-                       'July','August','September','October','November','December'];
-  document.getElementById('calMonthTitle').textContent = `${MONTH_NAMES[month]} ${year}`;
-
-  const firstDow   = new Date(year, month, 1).getDay();   // 0=Sun
+  const firstDow    = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const todayKey   = localDateKey(new Date());
+  const todayKey    = localDateKey(new Date());
 
-  // Build event map for this month's grid
   const eventMap = {};
   for (const ev of calendarAllEvents) {
     const key = dayKey(ev.start);
@@ -302,12 +369,16 @@ function renderCalendarMonth() {
   }
 
   const grid = document.getElementById('calGrid');
+  // Apply directional slide class
+  grid.className = 'cal-grid'
+    + (direction === 'forward'  ? ' slide-forward'  : '')
+    + (direction === 'backward' ? ' slide-backward' : '');
   grid.innerHTML = '';
 
   const totalCells = Math.ceil((firstDow + daysInMonth) / 7) * 7;
 
   for (let i = 0; i < totalCells; i++) {
-    const cell = document.createElement('div');
+    const cell   = document.createElement('div');
     const dayNum = i - firstDow + 1;
 
     if (dayNum < 1 || dayNum > daysInMonth) {
@@ -319,7 +390,7 @@ function renderCalendarMonth() {
     const dateKey   = `${year}-${String(month+1).padStart(2,'0')}-${String(dayNum).padStart(2,'0')}`;
     const isToday   = dateKey === todayKey;
     const isSelected = dateKey === calSelectedKey;
-    const dayEvents = eventMap[dateKey] || [];
+    const dayEvents  = eventMap[dateKey] || [];
 
     cell.className = 'cal-cell'
       + (isToday    ? ' is-today'  : '')
@@ -333,13 +404,12 @@ function renderCalendarMonth() {
     if (dayEvents.length > 0) {
       const dotsEl = document.createElement('div');
       dotsEl.className = 'cal-dots';
-      const shown = dayEvents.slice(0, 4);
-      for (const ev of shown) {
+      dayEvents.slice(0, 4).forEach(ev => {
         const dot = document.createElement('div');
         dot.className = 'cal-dot';
         dot.style.background = ev.color;
         dotsEl.appendChild(dot);
-      }
+      });
       if (dayEvents.length > 4) {
         const more = document.createElement('span');
         more.className = 'cal-more';
@@ -353,10 +423,8 @@ function renderCalendarMonth() {
     grid.appendChild(cell);
   }
 
-  // Re-render day panel if something was selected
   if (calSelectedKey) {
-    const ev = eventMap[calSelectedKey] || [];
-    renderCalDayPanel(calSelectedKey, ev);
+    renderCalDayPanel(calSelectedKey, eventMap[calSelectedKey] || []);
   } else {
     document.getElementById('calDayPanel').innerHTML = '';
   }
@@ -372,8 +440,8 @@ function selectCalDay(dateKey, events, cell) {
 function renderCalDayPanel(dateKey, events) {
   const panel = document.getElementById('calDayPanel');
   const [y, mo, d] = dateKey.split('-').map(Number);
-  const date  = new Date(y, mo - 1, d);
-  const title = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const title = new Date(y, mo - 1, d)
+    .toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
   panel.innerHTML = `<div class="cal-day-title">${title}</div>`;
 
@@ -382,43 +450,37 @@ function renderCalDayPanel(dateKey, events) {
     return;
   }
   for (const ev of events) {
-    const row = document.createElement('div');
+    const row     = document.createElement('div');
     row.className = 'cal-day-event';
-
-    const dot = document.createElement('div');
+    const dot     = document.createElement('div');
     dot.className = 'cal-day-dot';
     dot.style.background = ev.color;
-
-    const timeEl = document.createElement('div');
+    const timeEl  = document.createElement('div');
     timeEl.className = 'cal-day-time';
     timeEl.textContent = fmtTime(ev.start, ev.allDay);
-
     const titleEl = document.createElement('div');
     titleEl.className = 'cal-day-event-title';
     titleEl.textContent = ev.title;
-
     row.append(dot, timeEl, titleEl);
     panel.appendChild(row);
   }
 }
 
-// Month navigation
+// Month navigation with directional slide
 document.getElementById('monthPrev').addEventListener('click', () => {
   calViewDate.setMonth(calViewDate.getMonth() - 1);
   calSelectedKey = null;
-  renderCalendarMonth();
+  renderCalendarMonth('backward');
 });
 document.getElementById('monthNext').addEventListener('click', () => {
   calViewDate.setMonth(calViewDate.getMonth() + 1);
   calSelectedKey = null;
-  renderCalendarMonth();
+  renderCalendarMonth('forward');
 });
 
 document.getElementById('fabCalendar').addEventListener('click', openCalendarModal);
 document.getElementById('calendarClose').addEventListener('click', e => { e.stopPropagation(); closeCalendarModal(); });
 calendarBackdrop.addEventListener('click', e => { if (e.target === calendarBackdrop) closeCalendarModal(); });
-
-// Close modals on Escape (keyboard / remote)
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeWeatherModal(); closeCalendarModal(); }
 });

@@ -130,7 +130,8 @@ app.get('/api/weather', async (req, res) => {
     const url = `https://api.open-meteo.com/v1/forecast?` + new URLSearchParams({
       latitude, longitude, timezone,
       current: 'temperature_2m,apparent_temperature,weather_code,relative_humidity_2m,wind_speed_10m',
-      daily: 'temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max',
+      daily:   'temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max',
+      hourly:  'temperature_2m,weather_code,precipitation_probability',
       temperature_unit: 'fahrenheit',
       wind_speed_unit: 'mph',
       precipitation_unit: 'inch',
@@ -141,6 +142,21 @@ app.get('/api/weather', async (req, res) => {
     if (!r.ok) throw new Error(`Weather API error: ${r.status}`);
     const d = await r.json();
 
+    // Group hourly data by date so client can look up any day
+    // Open-Meteo returns local-time strings like "2026-02-25T14:00" when timezone is set
+    const hourlyByDay = {};
+    d.hourly.time.forEach((ts, i) => {
+      const [date, timePart] = ts.split('T');
+      const hour = parseInt(timePart.split(':')[0]);
+      if (!hourlyByDay[date]) hourlyByDay[date] = [];
+      hourlyByDay[date].push({
+        hour,
+        temp:   Math.round(d.hourly.temperature_2m[i]),
+        precip: d.hourly.precipitation_probability[i],
+        ...wmo(d.hourly.weather_code[i]),
+      });
+    });
+
     const data = {
       city,
       temp:     Math.round(d.current.temperature_2m),
@@ -150,11 +166,12 @@ app.get('/api/weather', async (req, res) => {
       ...wmo(d.current.weather_code),
       daily: d.daily.time.map((date, i) => ({
         date,
-        high:    Math.round(d.daily.temperature_2m_max[i]),
-        low:     Math.round(d.daily.temperature_2m_min[i]),
-        precip:  d.daily.precipitation_probability_max[i],
+        high:   Math.round(d.daily.temperature_2m_max[i]),
+        low:    Math.round(d.daily.temperature_2m_min[i]),
+        precip: d.daily.precipitation_probability_max[i],
         ...wmo(d.daily.weather_code[i]),
       })),
+      hourlyByDay,
     };
 
     setCache('weather', data);
