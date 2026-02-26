@@ -229,10 +229,13 @@ app.get('/api/calendar', async (req, res) => {
     }
 
     allEvents.sort((a, b) => {
-      // All-day events first within same day, then by start time
+      // Primary: chronological order
+      const diff = new Date(a.start) - new Date(b.start);
+      if (diff !== 0) return diff;
+      // Tiebreak: all-day events before timed events on the same day
       if (a.allDay && !b.allDay) return -1;
       if (!a.allDay && b.allDay) return 1;
-      return new Date(a.start) - new Date(b.start);
+      return 0;
     });
 
     const data = { events: allEvents, unconfigured: false };
