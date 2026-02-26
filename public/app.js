@@ -120,6 +120,7 @@ async function loadWeather() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     weatherData = await res.json();
 
+    document.getElementById('weatherBlock').style.display = '';
     document.getElementById('weatherIcon').textContent  = weatherData.icon ?? '🌡️';
     document.getElementById('weatherTemp').textContent  = `${weatherData.temp}°`;
     document.getElementById('weatherLabel').textContent = `${weatherData.label} · feels ${weatherData.feels}°`;
@@ -137,7 +138,7 @@ async function loadWeather() {
     }).join('');
   } catch (err) {
     console.warn('Weather unavailable:', err.message);
-    document.getElementById('weatherBlock').style.display = 'none';
+    if (!weatherData) document.getElementById('weatherBlock').style.display = 'none';
   }
 }
 loadWeather();
