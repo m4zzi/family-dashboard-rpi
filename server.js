@@ -247,6 +247,28 @@ app.get('/api/calendar', async (req, res) => {
   }
 });
 
+// ── Birthdays ────────────────────────────────────────────────────────────────
+app.get('/api/birthdays', (req, res) => {
+  const birthdays = config.birthdays || [];
+  if (birthdays.length === 0) return res.json([]);
+
+  const now = new Date();
+  const todayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+  const result = birthdays.map(b => {
+    const thisYear = new Date(now.getFullYear(), b.month - 1, b.day).getTime();
+    let daysUntil = Math.round((thisYear - todayMs) / 86400000);
+    if (daysUntil < 0) {
+      const nextYear = new Date(now.getFullYear() + 1, b.month - 1, b.day).getTime();
+      daysUntil = Math.round((nextYear - todayMs) / 86400000);
+    }
+    return { name: b.name, month: b.month, day: b.day, daysUntil };
+  });
+
+  result.sort((a, b) => a.daysUntil - b.daysUntil);
+  res.json(result);
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(config.port, () => {
   console.log(`\n🖼️  Family display running → http://localhost:${config.port}\n`);

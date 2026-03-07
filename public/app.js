@@ -10,6 +10,7 @@ let calendarAllEvents  = [];
 let calViewDate        = null;
 let calSelectedKey     = null;
 let expandedForecastDate = null;  // which day row has its hourly strip open
+let birthdaysByDate      = {};   // keyed by "MM-DD" for calendar modal lookup
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtTime(isoString, allDay) {
@@ -143,6 +144,48 @@ async function loadWeather() {
 }
 loadWeather();
 setInterval(loadWeather, WEATHER_REFRESH);
+
+// ── Birthdays ────────────────────────────────────────────────────────────────
+const birthdayBanner = document.getElementById('birthdayBanner');
+async function loadBirthdays() {
+  try {
+    const res = await fetch('/api/birthdays');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const birthdays = await res.json();
+    const upcoming = birthdays.filter(b => b.daysUntil <= 14);
+    if (upcoming.length === 0) { birthdayBanner.hidden = true; return; }
+
+    // Build lookup for calendar modal
+    birthdaysByDate = {};
+    for (const b of birthdays) {
+      const key = `${String(b.month).padStart(2,'0')}-${String(b.day).padStart(2,'0')}`;
+      if (!birthdaysByDate[key]) birthdaysByDate[key] = [];
+      birthdaysByDate[key].push(b.name);
+    }
+
+    birthdayBanner.hidden = false;
+    birthdayBanner.innerHTML = '';
+    for (const b of upcoming) {
+      const span = document.createElement('span');
+      if (b.daysUntil === 0) {
+        span.className = 'bday-item bday-today';
+        span.textContent = `\u{1F382} ${b.name}'s birthday!`;
+      } else if (b.daysUntil === 1) {
+        span.className = 'bday-item';
+        span.textContent = `\u{1F381} ${b.name} tomorrow`;
+      } else {
+        span.className = 'bday-item';
+        span.textContent = `\u{1F381} ${b.name} in ${b.daysUntil}d`;
+      }
+      birthdayBanner.appendChild(span);
+    }
+  } catch (err) {
+    console.warn('Birthdays unavailable:', err.message);
+    birthdayBanner.hidden = true;
+  }
+}
+loadBirthdays();
+setInterval(loadBirthdays, 60 * 60_000); // refresh hourly
 
 // ── Calendar strip ────────────────────────────────────────────────────────────
 async function loadCalendar() {
@@ -407,9 +450,19 @@ function renderCalendarMonth(direction) {
     numEl.textContent = dayNum;
     cell.appendChild(numEl);
 
-    if (dayEvents.length > 0) {
+    // Birthday dot for this cell
+    const cellBdayKey = `${String(month+1).padStart(2,'0')}-${String(dayNum).padStart(2,'0')}`;
+    const cellBdays = birthdaysByDate[cellBdayKey];
+
+    if (dayEvents.length > 0 || cellBdays) {
       const dotsEl = document.createElement('div');
       dotsEl.className = 'cal-dots';
+      if (cellBdays) {
+        const dot = document.createElement('div');
+        dot.className = 'cal-dot';
+        dot.style.background = 'var(--accent)';
+        dotsEl.appendChild(dot);
+      }
       dayEvents.slice(0, 4).forEach(ev => {
         const dot = document.createElement('div');
         dot.className = 'cal-dot';
@@ -451,7 +504,29 @@ function renderCalDayPanel(dateKey, events) {
 
   panel.innerHTML = `<div class="cal-day-title">${title}</div>`;
 
-  if (events.length === 0) {
+  // Show birthdays for this date
+  const bdayKey = `${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  const bdays = birthdaysByDate[bdayKey];
+  if (bdays) {
+    for (const name of bdays) {
+      const row = document.createElement('div');
+      row.className = 'cal-day-event cal-day-birthday';
+      const dot = document.createElement('div');
+      dot.className = 'cal-day-dot';
+      dot.style.background = 'var(--accent)';
+      const timeEl = document.createElement('div');
+      timeEl.className = 'cal-day-time';
+      timeEl.textContent = '\u{1F382}';
+      const titleEl = document.createElement('div');
+      titleEl.className = 'cal-day-event-title';
+      titleEl.textContent = `${name}'s birthday`;
+      titleEl.style.color = 'var(--accent)';
+      row.append(dot, timeEl, titleEl);
+      panel.appendChild(row);
+    }
+  }
+
+  if (events.length === 0 && !bdays) {
     panel.innerHTML += '<div class="cal-empty-day">Nothing scheduled</div>';
     return;
   }

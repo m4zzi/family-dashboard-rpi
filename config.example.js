@@ -37,6 +37,12 @@ module.exports = {
     timezone: 'America/Chicago',
   },
 
+  // ── Birthdays ──────────────────────────────────────────────
+  // { name: 'Display Name', month: 1-12, day: 1-31 }
+  birthdays: [
+    // { name: 'Mom', month: 2, day: 25 },
+  ],
+
   // ── Display Settings ─────────────────────────────────────
   photoInterval:  30000,  // ms between photo transitions (30s)
   calendarDays:   14,     // how many days ahead to show events
