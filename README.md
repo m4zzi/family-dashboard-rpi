@@ -11,9 +11,11 @@ A full-screen family display built for a Raspberry Pi. Shows a rotating iCloud p
 - **Weather** — current conditions + 3-day forecast strip; tap to open an 8-day detail modal with hourly breakdown per day via [Open-Meteo](https://open-meteo.com/) (free, no API key)
 - **Calendar strip** — upcoming events from any iCal feed (Google Calendar, Apple iCloud, or both), swipe left/right between days
 - **Calendar month view** — floating button opens a full month grid; tap any day to see its events; navigate months with arrow buttons
+- **Birthdays** — upcoming birthdays shown as a banner; today's birthday highlighted in amber
 - **Warm editorial design** — frosted glass panels, radial vignette, staggered entrance animations, Cormorant Garamond + DM Sans
 - **Touch-first** — all scrollable areas use a custom Pointer Events drag handler that works reliably on Linux/Wayland kiosk (CSS native scroll is unreliable in that environment)
 - **Kiosk-ready** — Chromium fullscreen autostart on boot via `.desktop` entry, PM2 for server persistence
+- **Meural digital frame support** — hourly auto-push of portrait snapshots to Netgear Meural frames (see below)
 
 ## Requirements
 
@@ -89,12 +91,61 @@ Exec=chromium --ozone-platform=wayland --kiosk --incognito --noerrdialogs --disa
 
 > **Wayland note** — Raspberry Pi OS Bookworm / Debian 13 runs a Wayland compositor. `--ozone-platform=wayland` is required for Chromium to enter true fullscreen kiosk mode without a title bar clipping the top of the page. Without it, XWayland is used and the window may be offset. `--password-store=basic` suppresses the GNOME keyring dialog on boot. `--touch-events=enabled` ensures touch input is activated on Linux.
 
+## Meural digital frame support
+
+`meural-push.js` takes N portrait screenshots of `/portrait.html` via Puppeteer and pushes them to a Netgear Meural gallery. On each run it clears the previous batch, uploads fresh ones, assigns the gallery to all configured devices, and sends an immediate local postcard push so frames update without waiting for cloud sync.
+
+### Setup
+
+Add a `meural` block to `config.js`:
+
+```js
+meural: {
+  email:           'your@email.com',
+  password:        'yourpassword',
+  cognitoClientId: '487bd4kvb1fnop6mbgk8gu5ibf',  // Meural's Cognito app client
+  cognitoRegion:   'eu-west-1',
+  galleryName:     'Dashboard',
+  devices: [
+    { id: 44255, name: 'frame-1', ip: '192.168.x.x' },
+    { id: 41840, name: 'frame-2', ip: '192.168.x.x' },
+  ],
+  // Pi-specific — use system Chromium instead of puppeteer's bundled one
+  chromiumPath: '/usr/bin/chromium',
+  portraitUrl:  'http://localhost:3000',  // omit to use localhost default
+},
+```
+
+Find your device IDs: log in at [my.meural.netgear.com](https://my.meural.netgear.com) or call `GET /v0/user/devices` with a valid token.
+
+### Running
+
+```bash
+# One-off (6 shots)
+node meural-push.js 6
+
+# On Mac — uses bundled Chromium
+npm install puppeteer --save-dev
+
+# On Pi — uses system Chromium (lighter)
+sudo apt install chromium
+npm install puppeteer-core --save-dev
+```
+
+### Hourly cron on Pi (PM2)
+
+```bash
+pm2 start meural-push.js --name meural-push --cron '0 * * * *' --no-autorestart -- 6
+pm2 save
+```
+
 ## Configuration reference
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `icloudAlbumToken` | — | iCloud Shared Album token |
 | `calendars` | `[]` | Array of `{ url, name, color }` iCal feeds |
+| `birthdays` | `[]` | Array of `{ name, month, day }` birthdays |
 | `weather.latitude` | — | Your city's latitude |
 | `weather.longitude` | — | Your city's longitude |
 | `weather.city` | — | Display name shown in weather modal |
@@ -102,6 +153,10 @@ Exec=chromium --ozone-platform=wayland --kiosk --incognito --noerrdialogs --disa
 | `photoInterval` | `30000` | Ms between photo transitions |
 | `calendarDays` | `14` | Days ahead shown in the events strip |
 | `port` | `3000` | Server port |
+| `meural.devices` | `[]` | Array of `{ id, name, ip }` Meural frames |
+| `meural.galleryName` | `'Dashboard'` | Cloud gallery name to manage |
+| `meural.chromiumPath` | — | Path to system Chromium (Pi only) |
+| `meural.portraitUrl` | `http://localhost:3000` | Base URL for portrait screenshots |
 
 ## Interactions
 

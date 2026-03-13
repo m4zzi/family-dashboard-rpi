@@ -36,10 +36,14 @@ chromium --ozone-platform=wayland --kiosk --incognito --noerrdialogs
 server.js          — Express API + in-memory cache
 config.js          — GITIGNORED — all secrets live here
 config.example.js  — committed template (no secrets)
+meural-push.js     — Puppeteer screenshot + Meural cloud upload script
 public/
-  index.html       — dashboard markup
-  style.css        — all styles
-  app.js           — client-side data fetching + rendering
+  index.html       — dashboard markup (kiosk)
+  style.css        — kiosk styles
+  app.js           — client-side data fetching + rendering (kiosk)
+  portrait.html    — Meural portrait layout (1080×1920 static snapshot)
+  portrait.css     — portrait styles — no glass, editorial, photo-as-hero
+  portrait.js      — portrait data fetching; sets data-ready for Puppeteer
 package.json
 ```
 
@@ -47,6 +51,20 @@ package.json
 - `GET /api/photos`          — iCloud shared album photos, cache 1hr
 - `GET /api/weather`         — Open-Meteo (no API key), cache 15min; includes `hourlyByDay` map
 - `GET /api/calendar?days=N` — iCal feeds via ical-expander, cache 5min; default N=14
+- `GET /api/birthdays`       — birthday list from config.js, returns daysUntil for each
+
+## Meural portrait pipeline
+`meural-push.js` runs on the Pi hourly via PM2 cron (`0 * * * *`):
+1. Cognito auth → find/dedup "Dashboard" gallery → clear old items
+2. Take N screenshots of `/portrait.html` via Puppeteer (waits for `data-ready`)
+3. Upload each to Meural cloud → add to gallery
+4. Assign gallery + sync on each device
+5. Local postcard push to each device IP for immediate display
+
+- Run manually: `node meural-push.js 6`
+- Logs: `pm2 logs meural-push`
+- Uses `puppeteer-core` + system `/usr/bin/chromium` on Pi; `puppeteer` on Mac
+- Config: `config.js` → `meural` block (`email`, `password`, `devices`, `chromiumPath`, `portraitUrl`)
 
 ## iCloud photo API flow
 1. POST `https://sharedstreams.icloud.com/{token}/sharedstreams/webstream` `{"streamCtag":null}`
