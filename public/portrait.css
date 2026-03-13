@@ -1,0 +1,258 @@
+/* ── Portrait layout for Meural digital canvas (1080×1920) ───────────────────
+   v5 — photo is the art. UI is the caption.
+   No glass, no cards. Typography lives directly on the image.
+   Like a magazine cover, not a dashboard. ── */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --white:       #FFFBF4;
+  --white-dim:   rgba(255, 248, 230, 0.58);
+  --white-faint: rgba(255, 248, 230, 0.32);
+  --accent:      #F0A500;
+  --shadow:      0 2px 24px rgba(0, 0, 0, 0.92);
+  --rule:        rgba(255, 248, 230, 0.14);
+}
+
+html, body {
+  width: 1080px; height: 1920px;
+  overflow: hidden;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--white);
+  background: #0c0906;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Photo background ────────────────────────────────────────────────────────── */
+.photo-bg {
+  position: fixed; inset: 0;
+  background-size: cover;
+  background-position: center 30%;
+}
+#photoBg1 { z-index: 0; opacity: 1; }
+#photoBg2 { z-index: 1; opacity: 0; }
+
+/* ── Overlays — heavy bottom gradient so text sits on near-black ─────────────── */
+.vignette {
+  position: fixed; inset: 0; z-index: 2;
+  background: radial-gradient(ellipse at 50% 28%,
+    transparent 15%, rgba(0,0,0,0.40) 65%, rgba(0,0,0,0.60) 100%);
+  pointer-events: none;
+}
+.gradient-top {
+  position: fixed; inset: 0 0 auto 0; height: 30%; z-index: 3;
+  background: linear-gradient(to bottom,
+    rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.50) 45%, rgba(0,0,0,0.10) 75%, transparent 100%);
+  pointer-events: none;
+}
+.gradient-bottom {
+  position: fixed; inset: auto 0 0 0; height: 72%; z-index: 3;
+  background: linear-gradient(to top,
+    rgba(0,0,0,0.98) 0%,
+    rgba(0,0,0,0.95) 18%,
+    rgba(0,0,0,0.78) 36%,
+    rgba(0,0,0,0.38) 55%,
+    transparent 100%);
+  pointer-events: none;
+}
+
+/* ── Top bar ─────────────────────────────────────────────────────────────────── */
+.top-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 60px 64px 0;
+}
+
+/* ── Date ────────────────────────────────────────────────────────────────────── */
+.date-block { line-height: 1.05; }
+.date-day {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 108px;
+  font-weight: 300;
+  letter-spacing: -3px;
+  text-shadow: var(--shadow);
+}
+.date-divider {
+  width: 56px; height: 2px;
+  background: var(--accent); opacity: 0.85;
+  margin: 14px 0 16px;
+}
+.date-full {
+  font-size: 28px; font-weight: 300;
+  color: var(--white-dim);
+  letter-spacing: 0.06em;
+  text-shadow: var(--shadow);
+}
+
+/* ── Weather ─────────────────────────────────────────────────────────────────── */
+.weather-block {
+  display: flex; flex-direction: column; align-items: flex-end;
+  padding-top: 8px;
+}
+.weather-temp-row {
+  display: flex; align-items: center; gap: 10px; line-height: 1;
+}
+.weather-temp {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 82px; font-weight: 400;
+  text-shadow: var(--shadow);
+}
+.weather-icon {
+  font-size: 52px; line-height: 1;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));
+}
+.weather-label {
+  font-size: 24px; font-weight: 300;
+  color: var(--white-dim); letter-spacing: 0.03em;
+  text-shadow: var(--shadow); margin-top: 6px;
+}
+
+/* ── Forecast strip — thin horizontal band, subtle dark underlay ─────────────── */
+.forecast-strip {
+  position: fixed;
+  top: 294px; left: 64px; right: 64px;
+  z-index: 10;
+  display: flex;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: 16px 0;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 6px;
+}
+.fc-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 6px;
+  border-right: 1px solid var(--rule);
+}
+.fc-item:last-child { border-right: none; }
+
+.fc-name {
+  font-size: 15px; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--white-faint);
+}
+.fc-item.is-today .fc-name { color: var(--accent); }
+
+.fc-icon { font-size: 28px; line-height: 1; }
+
+.fc-temps {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.fc-hi {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 42px; font-weight: 400; line-height: 1;
+  color: var(--white); text-shadow: var(--shadow);
+}
+.fc-lo {
+  font-size: 18px; font-weight: 300; line-height: 1;
+  color: var(--white-faint);
+}
+
+/* ── Bottom stack ────────────────────────────────────────────────────────────── */
+.bottom-stack {
+  position: fixed;
+  bottom: 0; left: 0; right: 0; z-index: 10;
+  padding: 0 64px 58px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  max-height: 940px;
+  overflow: hidden;
+}
+
+/* ── Birthday line — no box, just text ──────────────────────────────────────── */
+.birthday-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 32px;
+  padding: 0 0 20px;
+  border: none; background: none;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  border-radius: 0;
+}
+.birthday-banner[hidden] { display: none; }
+
+.bday-item {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 30px; font-weight: 300; font-style: italic;
+  color: var(--white-dim);
+  text-shadow: var(--shadow);
+  letter-spacing: 0.02em;
+}
+.bday-item.bday-today {
+  color: var(--accent);
+  font-weight: 400; font-style: normal; font-size: 34px;
+}
+
+/* ── Events — bare text on the gradient ─────────────────────────────────────── */
+.events-panel {
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--rule);
+  padding-top: 24px;
+  gap: 0;
+}
+
+/* Day heading — small all-caps label */
+.day-heading {
+  font-size: 13px; font-weight: 600;
+  letter-spacing: 0.20em; text-transform: uppercase;
+  color: var(--white-faint);
+  text-shadow: var(--shadow);
+  margin: 22px 0 4px;
+}
+.day-heading:first-child { margin-top: 0; }
+.day-heading.today { color: var(--accent); }
+
+/* Event row */
+.event-row {
+  display: flex;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(255, 248, 230, 0.07);
+}
+.event-row:last-child { border-bottom: none; }
+
+/* Colored calendar bar */
+.event-bar {
+  width: 3px;
+  align-self: stretch; min-height: 28px;
+  border-radius: 2px; flex-shrink: 0;
+  margin-right: 22px;
+  opacity: 0.85;
+}
+
+/* Time — fixed width column */
+.event-time {
+  font-size: 19px; font-weight: 300;
+  color: var(--white-faint); letter-spacing: 0.03em;
+  flex: 0 0 132px; flex-shrink: 0;
+  text-shadow: var(--shadow);
+}
+.event-time.allday { font-style: italic; }
+
+/* Title — large serif, wraps naturally */
+.event-title {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 38px; font-weight: 400; line-height: 1.15;
+  color: var(--white);
+  text-shadow: var(--shadow);
+  flex: 1; min-width: 0;
+}
+
+.no-events {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 30px; font-style: italic; font-weight: 300;
+  color: var(--white-faint);
+  padding: 12px 0;
+  text-shadow: var(--shadow);
+}

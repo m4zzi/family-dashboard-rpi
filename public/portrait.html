@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Family Display — Portrait</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="portrait.css">
+</head>
+<body>
+
+  <!-- Photo background layers -->
+  <div class="photo-bg" id="photoBg1"></div>
+  <div class="photo-bg" id="photoBg2"></div>
+
+  <!-- Cinematic overlays -->
+  <div class="vignette"></div>
+  <div class="gradient-top"></div>
+  <div class="gradient-bottom"></div>
+
+  <!-- ── Top: date + weather ──────────────────── -->
+  <header class="top-bar">
+    <div class="date-block">
+      <div class="date-day" id="dateDay">--</div>
+      <div class="date-divider"></div>
+      <div class="date-full" id="dateFull">------</div>
+    </div>
+    <div class="weather-block" id="weatherBlock">
+      <div class="weather-temp-row">
+        <div class="weather-temp" id="weatherTemp">--°</div>
+        <div class="weather-icon" id="weatherIcon">--</div>
+      </div>
+      <div class="weather-label" id="weatherLabel">--</div>
+    </div>
+  </header>
+
+  <!-- ── Forecast strip ───────────────────────── -->
+  <div class="forecast-strip" id="forecastStrip"></div>
+
+  <!-- ── Bottom stack: birthday banner + events ── -->
+  <div class="bottom-stack">
+    <div class="birthday-banner" id="birthdayBanner" hidden></div>
+    <section class="events-panel" id="eventsPanel"></section>
+  </div>
+
+  <script src="portrait.js"></script>
+</body>
+</html>

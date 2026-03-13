@@ -3,5 +3,8 @@ node_modules/
 # Contains private calendar URLs and iCloud token — never commit
 config.js
 
+# Meural snapshot temp files
+_meural-snapshot*.jpg
+
 # Claude Code local settings
 .claude/
