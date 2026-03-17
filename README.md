@@ -135,7 +135,7 @@ npm install puppeteer-core --save-dev
 ### Hourly cron on Pi (PM2)
 
 ```bash
-pm2 start meural-push.js --name meural-push --cron '0 * * * *' --no-autorestart -- 6
+pm2 start meural-push.js --name meural-push --cron '0 5-22 * * *' --no-autorestart -- 6
 pm2 save
 ```
 

@@ -66,6 +66,11 @@ package.json
 - Uses `puppeteer-core` + system `/usr/bin/chromium` on Pi; `puppeteer` on Mac
 - Config: `config.js` → `meural` block (`email`, `password`, `devices`, `chromiumPath`, `portraitUrl`)
 
+### Call architecture
+- **All gallery management** (auth, create/clear gallery, upload items, assign gallery, sync) → Meural cloud API at `api.meural.com/v0`
+- **Postcard only** → direct HTTP to `http://{device.ip}/remote/postcard` on the local network
+- Cloud sync is unreliable for timing; the local postcard is the real "show it now" mechanism — if postcard fails, the frame will eventually sync via cloud but may lag by minutes
+
 ## iCloud photo API flow
 1. POST `https://sharedstreams.icloud.com/{token}/sharedstreams/webstream` `{"streamCtag":null}`
 2. If HTTP 330 → redirect host is in `X-Apple-MMe-Host` response field
@@ -128,6 +133,7 @@ CSS native `overflow: auto` scroll does not work reliably on Chromium/Linux Wayl
 - **Event cards**: colored left-border bar (3px, not dot) — color maps to calendar name
 
 ## Known issues / debugging notes
+- **Meural frame shows stale images (old date/weather):** postcard push is failing for that device. Check: (1) `pm2 logs meural-push` — look for `postcard: fetch failed` or timeout on that device; (2) ping the device IP from the Pi — `ping 192.168.3.59`; (3) if unreachable, the frame has dropped off Unifi (known fixed-IP bug on whistler-341) — reboot the frame, it will reconnect on the same IP; (4) run `node meural-push.js 6` manually to push immediately after it reconnects.
 - If the weather modal header appears cut off on the Pi: likely `scrollIntoView` on the current hour card scrolling the modal vertically. Fix: use `strip.scrollLeft = card.offsetLeft - strip.offsetWidth/2 + card.offsetWidth/2` instead of `scrollIntoView`.
 - If touch scroll isn't working at all: check `--touch-events=enabled` is in the Chromium autostart.
 - If kiosk window has a title bar clipping content: check `--ozone-platform=wayland` is in the autostart and that the session is actually Wayland (`echo $WAYLAND_DISPLAY` should return `wayland-0`).
