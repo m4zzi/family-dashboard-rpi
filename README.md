@@ -175,6 +175,11 @@ pm2 save
 
 `config.js` is gitignored and will never be committed. Your iCal URLs contain private tokens — treat them like passwords. They are only fetched server-side; the raw URLs never reach the browser.
 
+## Planned features
+
+- **Apple Reminders on portrait** — new `/api/reminders` endpoint parses `VTODO` components from the existing iCloud Reminders iCal feed (already configured as the "Home" calendar). Portrait layout splits the bottom area into two columns: events on the left, incomplete reminders on the right.
+- **Home Assistant local sensors** — fetch Aqara temperature sensors via the HA REST API (`GET /api/states/{entity_id}`, long-lived token auth). New `/api/sensors` endpoint with ~1min cache. Display indoor vs outdoor temp on both kiosk and portrait. Blocked on migrating Home Assistant to pve2 first.
+
 ## Tech stack
 
 - **Backend**: Node.js 20, Express, [ical-expander](https://github.com/nicmeister/ical-expander)

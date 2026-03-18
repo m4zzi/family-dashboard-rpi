@@ -139,6 +139,10 @@ CSS native `overflow: auto` scroll does not work reliably on Chromium/Linux Wayl
 - If kiosk window has a title bar clipping content: check `--ozone-platform=wayland` is in the autostart and that the session is actually Wayland (`echo $WAYLAND_DISPLAY` should return `wayland-0`).
 - If swiping selects text instead of scrolling: `user-select: none` on body should prevent this; also check `overflow: clip` (not `hidden`) on `.events-panel`.
 
+## Planned features (not yet implemented)
+- **Apple Reminders on portrait** — `/api/reminders` endpoint parses `VTODO` from the existing iCloud Reminders iCal feed; portrait splits bottom area into events (left) + reminders (right) columns
+- **Home Assistant local sensors** — `/api/sensors` fetches Aqara temp sensors via `GET http://homeassistant.home/api/states/{entity_id}` with a long-lived Bearer token; show indoor vs outdoor temp on kiosk + portrait; blocked on HA migration to pve2
+
 ## GitHub
 - Repo: https://github.com/m4zzi/family-dashboard-rpi
 - `config.js` is gitignored — never commit it
