@@ -62,7 +62,7 @@ async function apiDelete(token, p) {
   if (!res.ok && res.status !== 404) throw new Error(`DELETE ${p}: ${res.status}`);
 }
 
-// ── Gallery: find/create, remove duplicates, clear items ─────────────────────
+// ── Gallery: find/create, remove duplicates, collect existing item IDs ────────
 async function prepareGallery(token) {
   const all = await apiGet(token, '/user/galleries?count=1000');
   const matches = all.filter(g => g.name === mc.galleryName);
@@ -85,22 +85,30 @@ async function prepareGallery(token) {
     console.log(`Created gallery "${mc.galleryName}" id: ${galleryId}`);
   }
 
-  // Clear existing items so the gallery only ever has our fresh screenshots
+  // Collect existing item IDs — we'll delete them after new content is pushed
+  let oldItemIds = [];
   try {
     const items = await apiGet(token, `/galleries/${galleryId}/items?count=1000`);
     if (items && items.length > 0) {
-      console.log(`Removing ${items.length} existing item(s)...`);
-      for (const item of items) {
-        await apiDelete(token, `/items/${item.id}`).catch(e => console.warn(`  item ${item.id}: ${e.message}`));
-      }
+      oldItemIds = items.map(item => item.id);
+      console.log(`Found ${oldItemIds.length} existing item(s) — will remove after push`);
     } else {
-      console.log('Gallery is empty — nothing to clear');
+      console.log('Gallery is empty');
     }
   } catch (e) {
     console.warn('Could not list gallery items:', e.message);
   }
 
-  return galleryId;
+  return { galleryId, oldItemIds };
+}
+
+// ── Delete old items (called after new content is pushed) ─────────────────────
+async function clearOldItems(token, oldItemIds) {
+  if (oldItemIds.length === 0) return;
+  console.log(`\nRemoving ${oldItemIds.length} old item(s)...`);
+  for (const id of oldItemIds) {
+    await apiDelete(token, `/items/${id}`).catch(e => console.warn(`  item ${id}: ${e.message}`));
+  }
 }
 
 // ── Screenshots via Puppeteer ─────────────────────────────────────────────────
@@ -185,6 +193,20 @@ async function pushToDevices(token, galleryId, postcardPath) {
       });
       console.log(`  ✓ Postcard: ${res.ok ? 'showing now' : `HTTP ${res.status}`}`);
     } catch (e) { console.warn(`  postcard: ${e.message}`); }
+
+    // Pin the frame to the Dashboard gallery and resume playback. Postcards are
+    // only a temporary override; without this the frame's slideshow can drift
+    // back to other galleries (Sampler, Kids, Recents) or replay stale cached
+    // Dashboard items after a wifi blip. change_gallery forces a re-pull.
+    try {
+      await fetch(`http://${device.ip}/remote/control_command/change_gallery/${galleryId}`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      await fetch(`http://${device.ip}/remote/control_command/resume`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      console.log(`  ✓ Pinned to gallery ${galleryId}`);
+    } catch (e) { console.warn(`  pin: ${e.message}`); }
   }
 }
 
@@ -196,7 +218,7 @@ async function main() {
   const token = await getToken();
   console.log('✓ Authenticated\n');
 
-  const galleryId = await prepareGallery(token);
+  const { galleryId, oldItemIds } = await prepareGallery(token);
   console.log();
 
   const snapPaths = await takeScreenshots(COUNT);
@@ -214,6 +236,10 @@ async function main() {
   console.log('✓ All items in gallery');
 
   await pushToDevices(token, galleryId, snapPaths[0]);
+
+  // Delete old items now that new content is live — if we fail before this
+  // point, old items remain in the gallery so frames never go blank.
+  await clearOldItems(token, oldItemIds);
 
   // Clean up local snapshot files
   for (const p of snapPaths) fs.unlinkSync(p);
