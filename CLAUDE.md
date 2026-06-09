@@ -139,6 +139,13 @@ CSS native `overflow: auto` scroll does not work reliably on Chromium/Linux Wayl
 - If kiosk window has a title bar clipping content: check `--ozone-platform=wayland` is in the autostart and that the session is actually Wayland (`echo $WAYLAND_DISPLAY` should return `wayland-0`).
 - If swiping selects text instead of scrolling: `user-select: none` on body should prevent this; also check `overflow: clip` (not `hidden`) on `.events-panel`.
 
+## Baby-cam overlay (kiosk-only — live UniFi cameras)
+A tap-to-open fullscreen overlay showing a live baby cam (`public/babycam/` + a FAB; `/api/cameras` endpoint; off unless `config.babycam` is set).
+- **Streaming = go2rtc on the Pi** (arm64 binary under pm2 as `go2rtc`, config `~/go2rtc.yaml`), **bound localhost-only** (`127.0.0.1:1984`/`:8555`) so the feed is reachable only from the Pi. Pulls RTSP from the **UNVR (`192.168.2.58:7447`)** (cameras: Baby Cam + Lyla Room, Medium channel). On-demand; one stream at a time (toggle swaps).
+- **Meural-safe by design:** the overlay is only in `index.html`; `meural-push.js` screenshots `/portrait.html`, which has no camera → the frames can never capture it.
+- Gotchas: go2rtc needs `api.origin: "*"` (dashboard `:3000`→go2rtc `:1984` is cross-origin, else 403); switching cameras requires `vs.ondisconnect()` before setting the new `.src` (VideoRTC won't reconnect otherwise); reload the kiosk via a **Pi reboot** (SSH-launched chromium returns exit 255 but the GUI doesn't always attach to the Wayland seat).
+- Full detail: auto-memory `project_babycam`.
+
 ## Planned features (not yet implemented)
 - **Apple Reminders on portrait** — `/api/reminders` endpoint parses `VTODO` from the existing iCloud Reminders iCal feed; portrait splits bottom area into events (left) + reminders (right) columns
 - **Home Assistant local sensors** — `/api/sensors` fetches Aqara temp sensors via `GET http://homeassistant.home/api/states/{entity_id}` with a long-lived Bearer token; show indoor vs outdoor temp on kiosk + portrait; blocked on HA migration to pve2
