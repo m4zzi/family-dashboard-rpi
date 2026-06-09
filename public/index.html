@@ -67,6 +67,17 @@
     </svg>
   </button>
 
+  <!-- ── Floating baby-cam button (hidden until /api/cameras confirms config) ── -->
+  <button class="fab-babycam" id="fabBabyCam" title="Baby cameras" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="11" r="8"/>
+      <circle cx="9" cy="10" r="0.6" fill="currentColor" stroke="none"/>
+      <circle cx="15" cy="10" r="0.6" fill="currentColor" stroke="none"/>
+      <path d="M9.5 13.5a3 2 0 0 0 5 0"/>
+      <path d="M12 3c1.6 0 2.2 1 2 2"/>
+    </svg>
+  </button>
+
   <!-- ── Photo counter ────────────────────────── -->
   <div class="photo-counter" id="photoCounter"></div>
 
@@ -98,6 +109,23 @@
     </div>
   </div>
 
+  <!-- ── Baby-cam overlay (kiosk-only — absent from portrait.html, so Meural never captures it) ── -->
+  <div class="babycam-overlay" id="babycamOverlay" hidden>
+    <div class="babycam-stage" id="babycamStage"></div>
+    <div class="babycam-loading" id="babycamLoading">connecting…</div>
+    <div class="babycam-bar">
+      <div class="babycam-cams" id="babycamCams"></div>
+      <div class="babycam-controls">
+        <span class="babycam-timer" id="babycamTimer"></span>
+        <button class="babycam-btn" id="babycamExtend" title="Add an hour">+1h</button>
+        <button class="babycam-btn" id="babycamMute" title="Mute / unmute">🔊</button>
+        <button class="babycam-btn babycam-close" id="babycamClose" title="Close">✕</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
+  <script type="module" src="babycam/video-stream.js"></script>
+  <script type="module" src="babycam/babycam.js"></script>
 </body>
 </html>

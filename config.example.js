@@ -54,4 +54,18 @@ module.exports = {
     weather:  15 * 60 * 1000,   // 15 minutes
     calendar:  5 * 60 * 1000,   // 5 minutes
   },
+
+  // ── Baby-cam overlay (OPTIONAL) ───────────────────────────────────────────
+  // Leave this out entirely to disable the feature (the FAB stays hidden).
+  // Streams are served by a local go2rtc bound to 127.0.0.1 on the Pi (install
+  // separately); the actual camera RTSP URLs live ONLY in ~/go2rtc.yaml on the
+  // Pi, never here. `id` must match a stream name in that go2rtc config.
+  // babycam: {
+  //   port: 1984,            // go2rtc API port (localhost)
+  //   autoCloseHours: 2,     // overlay auto-closes after this long
+  //   cameras: [
+  //     { id: 'baby_cam',  label: 'Baby Cam'  },
+  //     { id: 'lyla_room', label: 'Lyla Room' },
+  //   ],
+  // },
 };

@@ -269,6 +269,19 @@ app.get('/api/birthdays', (req, res) => {
   res.json(result);
 });
 
+// Baby-cam overlay config (kiosk only). Returns an empty list if `config.babycam`
+// is absent → the overlay stays dark and the FAB hidden. No secrets: go2rtc is
+// localhost-only on the Pi, so the client only needs the port + stream ids.
+app.get('/api/cameras', (req, res) => {
+  const bc = config.babycam;
+  if (!bc || !Array.isArray(bc.cameras) || bc.cameras.length === 0) return res.json({ cameras: [] });
+  res.json({
+    port: bc.port || 1984,
+    autoCloseHours: bc.autoCloseHours || 2,
+    cameras: bc.cameras.map(c => ({ id: c.id, label: c.label })),
+  });
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(config.port, () => {
   console.log(`\n🖼️  Family display running → http://localhost:${config.port}\n`);
