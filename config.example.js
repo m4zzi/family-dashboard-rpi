@@ -55,6 +55,14 @@ module.exports = {
     calendar:  5 * 60 * 1000,   // 5 minutes
   },
 
+  // ── Monitoring heartbeat (OPTIONAL) ──────────────────────────────────────
+  // If set, meural-push.js POSTs here after each fully-successful push run
+  // (Gatus external-endpoint with a heartbeat window — silence = alert).
+  // gatus: {
+  //   pushUrl: 'http://<gatus-host>:3001/api/v1/endpoints/<group>_<name>/external?success=true',
+  //   token:   '<bearer token>',
+  // },
+
   // ── Baby-cam overlay (OPTIONAL) ───────────────────────────────────────────
   // Leave this out entirely to disable the feature (the FAB stays hidden).
   // Streams are served by a local go2rtc bound to 127.0.0.1 on the Pi (install

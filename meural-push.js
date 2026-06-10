@@ -6,7 +6,7 @@
 
 const path = require('path');
 const fs   = require('fs');
-const { meural: mc } = require('./config');
+const { meural: mc, gatus: gatusCfg } = require('./config');
 
 const COGNITO_URL     = `https://cognito-idp.${mc.cognitoRegion}.amazonaws.com/`;
 const API_BASE        = 'https://api.meural.com/v0';
@@ -245,6 +245,20 @@ async function main() {
   for (const p of snapPaths) fs.unlinkSync(p);
 
   console.log('\n=== Done ===');
+
+  // Success-only monitoring heartbeat (optional `gatus` block in config.js).
+  // Reached only when the whole push completed — a failed run skips it, and the
+  // monitor's heartbeat window flags the silence.
+  if (gatusCfg?.pushUrl && gatusCfg?.token) {
+    try {
+      const res = await fetch(gatusCfg.pushUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${gatusCfg.token}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      console.log(`Monitoring heartbeat: ${res.ok ? 'sent' : `HTTP ${res.status}`}`);
+    } catch (e) { console.warn(`Monitoring heartbeat failed: ${e.message}`); }
+  }
 }
 
 main().catch(err => { console.error('\nFatal:', err.message); process.exit(1); });
