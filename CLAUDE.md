@@ -15,7 +15,7 @@ Node.js/Express backend serves a vanilla JS frontend. No build step.
 ## Deploy workflow (from Mac)
 ```bash
 rsync -av --exclude=node_modules --exclude=.git \
-  /Users/thomazdesouza/Documents/Projects/claude/coffee-display/ \
+  /Users/thomazdesouza/Documents/Projects/coffee-display/ \
   m4zzi@192.168.2.164:~/family-display/
 ssh m4zzi@192.168.2.164 "pm2 restart family-display"
 ```
