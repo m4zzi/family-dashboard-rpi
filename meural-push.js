@@ -14,6 +14,16 @@ const PORTRAIT_URL    = (mc.portraitUrl || 'http://localhost:3000') + '/portrait
 const COUNT           = parseInt(process.argv[2]) || 6;
 const SNAPSHOT_DIR    = __dirname;
 const snapshotPath    = (i) => path.join(SNAPSHOT_DIR, `_meural-snapshot-${i}.jpg`);
+const sleep           = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Nightly full resync: the last cron run of the day (local hour 22 — schedule is
+// `0 5-22 * * *`) purges + re-pulls each frame's LOCAL gallery cache. Frames can
+// silently stop honoring cloud item-deletes and hoard stale local snapshots — one
+// wedged a frame on a 3-week-old image while the cloud gallery was perfectly
+// current, and neither a reboot nor a gallery-bounce cleared it. Force manually
+// with a `resync` arg:  node meural-push.js 6 resync
+const NIGHTLY_RESYNC_HOUR = 22;
+const RESYNC          = process.argv.slice(2).includes('resync') || new Date().getHours() === NIGHTLY_RESYNC_HOUR;
 
 // ── Cognito auth ──────────────────────────────────────────────────────────────
 async function getToken() {
@@ -210,6 +220,31 @@ async function pushToDevices(token, galleryId, postcardPath) {
   }
 }
 
+// ── Nightly full resync: purge + re-pull each frame's LOCAL gallery cache ──────
+// Removing the gallery from the device + sync makes the frame delete its local
+// copy (the stale-hoard); re-adding + sync re-pulls only the current items. Run
+// AFTER the normal push so the re-pull lands on fresh content. Heavier than a
+// normal sync (extra delete/sync round-trips), so it's once-a-night, not hourly.
+async function resyncDevices(token, galleryId) {
+  console.log('\n=== Nightly full resync (purge stale local cache + re-pull) ===');
+  for (const device of mc.devices) {
+    console.log(`\n--- ${device.name} (id: ${device.id}) ---`);
+    try {
+      await apiDelete(token, `/devices/${device.id}/galleries/${galleryId}`);
+      await fetch(`${API_BASE}/devices/${device.id}/sync`, { method: 'POST', headers: headers(token) });
+      console.log('  ✓ gallery removed + purge sync');
+      await sleep(8_000);   // let the frame act on the removal before re-adding
+      await fetch(`${API_BASE}/devices/${device.id}/galleries/${galleryId}`, { method: 'POST', headers: headers(token) });
+      await fetch(`${API_BASE}/devices/${device.id}/sync`, { method: 'POST', headers: headers(token) });
+      console.log('  ✓ gallery re-added + re-pull sync');
+      await sleep(10_000);  // let the re-pull finish before forcing display
+      await fetch(`http://${device.ip}/remote/control_command/change_gallery/${galleryId}/`, { signal: AbortSignal.timeout(10_000) });
+      await fetch(`http://${device.ip}/remote/control_command/resume/`, { signal: AbortSignal.timeout(10_000) });
+      console.log('  ✓ re-pinned + resumed');
+    } catch (e) { console.warn(`  resync: ${e.message}`); }
+  }
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log(`=== Meural Push (${COUNT} shots) ===\n`);
@@ -240,6 +275,10 @@ async function main() {
   // Delete old items now that new content is live — if we fail before this
   // point, old items remain in the gallery so frames never go blank.
   await clearOldItems(token, oldItemIds);
+
+  // Last run of the night: force frames to purge + re-pull their local cache so
+  // they can't drift into hoarding stale snapshots (see resyncDevices comment).
+  if (RESYNC) await resyncDevices(token, galleryId);
 
   // Clean up local snapshot files
   for (const p of snapPaths) fs.unlinkSync(p);
