@@ -54,6 +54,8 @@ package.json
 - `GET /api/birthdays`       — birthday list from config.js, returns daysUntil for each
 
 ## Meural portrait pipeline
+> **Operations runbook: [`MEURAL.md`](MEURAL.md)** — the two delivery paths, the three failure modes + how to tell them apart, and the postcard-resilience design. Read that first when a frame shows the wrong thing.
+
 `meural-push.js` runs on the Pi hourly via PM2 cron (`0 5-22 * * *`, 5am–10pm):
 1. Cognito auth → find/dedup "Dashboard" gallery → clear old items
 2. Take N screenshots of `/portrait.html` via Puppeteer (waits for `data-ready`)
