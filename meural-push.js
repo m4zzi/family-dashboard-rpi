@@ -175,26 +175,34 @@ async function uploadItem(token, filePath, label) {
   return data.id;
 }
 
-// ── Assign gallery to devices + local postcard ────────────────────────────────
-async function pushToDevices(token, galleryId, postcardPath) {
+// ── Push to devices: postcard (LOCAL, reliable) + optional gallery assign/pin ───
+// The postcard goes straight to each frame's local API and bypasses Meural's
+// cloud entirely — it's the dependable display path. The gallery assign + re-pin
+// only run when the cloud upload SUCCEEDED (cloudOk): they make the new content
+// persistent across rotation. When the cloud is down the gallery is stale, so we
+// must NOT re-pin (it would replace the fresh postcard with old gallery content)
+// — we just leave the postcard showing.
+async function pushToDevices(token, galleryId, postcardPath, cloudOk = true) {
   for (const device of mc.devices) {
     console.log(`\n--- ${device.name} (id: ${device.id}) ---`);
 
-    try {
-      await fetch(`${API_BASE}/devices/${device.id}/galleries/${galleryId}`, {
-        method: 'POST', headers: headers(token),
-      });
-      console.log(`  ✓ Gallery ${galleryId} assigned`);
-    } catch (e) { console.warn(`  assign: ${e.message}`); }
+    if (cloudOk) {
+      try {
+        await fetch(`${API_BASE}/devices/${device.id}/galleries/${galleryId}`, {
+          method: 'POST', headers: headers(token),
+        });
+        console.log(`  ✓ Gallery ${galleryId} assigned`);
+      } catch (e) { console.warn(`  assign: ${e.message}`); }
 
-    try {
-      await fetch(`${API_BASE}/devices/${device.id}/sync`, {
-        method: 'POST', headers: headers(token),
-      });
-      console.log('  ✓ Sync triggered');
-    } catch (e) { console.warn(`  sync: ${e.message}`); }
+      try {
+        await fetch(`${API_BASE}/devices/${device.id}/sync`, {
+          method: 'POST', headers: headers(token),
+        });
+        console.log('  ✓ Sync triggered');
+      } catch (e) { console.warn(`  sync: ${e.message}`); }
+    }
 
-    // Postcard = first snapshot, shows immediately on the frame
+    // Postcard = the reliable local display path. ALWAYS runs (cloud-independent).
     try {
       const form = new FormData();
       form.append('photo', new Blob([fs.readFileSync(postcardPath)], { type: 'image/jpeg' }), 'dashboard.jpg');
@@ -204,19 +212,29 @@ async function pushToDevices(token, galleryId, postcardPath) {
       console.log(`  ✓ Postcard: ${res.ok ? 'showing now' : `HTTP ${res.status}`}`);
     } catch (e) { console.warn(`  postcard: ${e.message}`); }
 
-    // Pin the frame to the Dashboard gallery and resume playback. Postcards are
-    // only a temporary override; without this the frame's slideshow can drift
-    // back to other galleries (Sampler, Kids, Recents) or replay stale cached
-    // Dashboard items after a wifi blip. change_gallery forces a re-pull.
-    try {
-      await fetch(`http://${device.ip}/remote/control_command/change_gallery/${galleryId}`, {
-        signal: AbortSignal.timeout(10_000),
-      });
-      await fetch(`http://${device.ip}/remote/control_command/resume`, {
-        signal: AbortSignal.timeout(10_000),
-      });
-      console.log(`  ✓ Pinned to gallery ${galleryId}`);
-    } catch (e) { console.warn(`  pin: ${e.message}`); }
+    if (cloudOk) {
+      // Pin to the freshly-updated gallery so the postcard doesn't drift back to
+      // other galleries / stale cached items after a wifi blip (change_gallery
+      // forces a re-pull). Only safe when the upload succeeded.
+      try {
+        await fetch(`http://${device.ip}/remote/control_command/change_gallery/${galleryId}`, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        await fetch(`http://${device.ip}/remote/control_command/resume`, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        console.log(`  ✓ Pinned to gallery ${galleryId}`);
+      } catch (e) { console.warn(`  pin: ${e.message}`); }
+    } else {
+      // Cloud down: just make sure the postcard is the thing showing; do NOT
+      // re-pin to the stale gallery.
+      try {
+        await fetch(`http://${device.ip}/remote/control_command/resume`, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        console.log('  ✓ Postcard left showing (cloud down — gallery not re-pinned)');
+      } catch (e) { console.warn(`  resume: ${e.message}`); }
+    }
   }
 }
 
@@ -259,26 +277,37 @@ async function main() {
   const snapPaths = await takeScreenshots(COUNT);
   console.log();
 
-  console.log(`Uploading ${snapPaths.length} image(s)...`);
+  // Cloud gallery upload is BEST-EFFORT: Meural's cloud intermittently 500s on
+  // image uploads (their backend), and a cloud failure must NOT abort the run —
+  // the local postcard below is what actually keeps the frames current. Count
+  // successes so the rest of the run knows whether the cloud is usable.
+  console.log(`Uploading ${snapPaths.length} image(s) to the cloud gallery (best-effort)...`);
+  let uploaded = 0;
   for (let i = 0; i < snapPaths.length; i++) {
-    const itemId = await uploadItem(token, snapPaths[i], `[${i + 1}/${snapPaths.length}]`);
     try {
+      const itemId = await uploadItem(token, snapPaths[i], `[${i + 1}/${snapPaths.length}]`);
       await fetch(`${API_BASE}/galleries/${galleryId}/items/${itemId}`, {
         method: 'POST', headers: headers(token),
-      });
-    } catch (e) { console.warn(`  add to gallery: ${e.message}`); }
+      }).catch((e) => console.warn(`  add to gallery: ${e.message}`));
+      uploaded++;
+    } catch (e) { console.warn(`  cloud upload [${i + 1}] failed (continuing): ${e.message}`); }
   }
-  console.log('✓ All items in gallery');
+  const cloudOk = uploaded > 0;
+  console.log(cloudOk
+    ? `✓ ${uploaded}/${snapPaths.length} item(s) in gallery`
+    : '⚠ cloud upload unavailable (Meural 500?) — delivering postcards only this run');
 
-  await pushToDevices(token, galleryId, snapPaths[0]);
+  // Postcard always goes out (local path); gallery assign/pin only when cloudOk.
+  await pushToDevices(token, galleryId, snapPaths[0], cloudOk);
 
-  // Delete old items now that new content is live — if we fail before this
-  // point, old items remain in the gallery so frames never go blank.
-  await clearOldItems(token, oldItemIds);
-
-  // Last run of the night: force frames to purge + re-pull their local cache so
-  // they can't drift into hoarding stale snapshots (see resyncDevices comment).
-  if (RESYNC) await resyncDevices(token, galleryId);
+  // Gallery housekeeping only makes sense when the cloud is working — otherwise
+  // we'd be clearing/re-pulling a stale gallery on top of a good postcard.
+  if (cloudOk) {
+    // Delete old items now that new content is live.
+    await clearOldItems(token, oldItemIds);
+    // Last run of the night: purge + re-pull each frame's local cache.
+    if (RESYNC) await resyncDevices(token, galleryId);
+  }
 
   // Clean up local snapshot files
   for (const p of snapPaths) fs.unlinkSync(p);
