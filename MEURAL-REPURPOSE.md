@@ -1,6 +1,18 @@
 # Meural local-control project — taking the frames off the cloud
 
-**Goal:** drive the (expensive, great) Meural panels with our own dashboard image, fully local, no Meural cloud — because their upload backend is broken (a ~15 KB request-body ceiling on `POST /items`; see [`MEURAL.md`](MEURAL.md) failure mode #2). It's a wound-down NETGEAR product; the cloud isn't getting fixed on any timeline we control.
+> **STATUS 2026-06-18 — SHELVED; we did NOT need it.** Every rooting vector tried is locked (see "Outcome" below), and a **no-root fix won**: the local `/remote/postcard` endpoint + pinning `previewDuration` to 24h keeps the dashboard current with zero dependence on Meural's broken upload (see [`MEURAL.md`](MEURAL.md)). This doc is kept as the record + the plan if we ever revisit full cloud-independence. **Confirmed OS is Ubuntu 16.04** (not 14.04 as an early teardown report said).
+
+**Goal (original):** drive the Meural panels with our own image, fully local, no Meural cloud — because their `POST /items` upload backend is broken (byte-size-correlated 500s; exact mechanism unproven — see [`MEURAL.md`](MEURAL.md) failure mode #2). It's a wound-down NETGEAR product; the cloud isn't getting fixed on any timeline we control.
+
+## Outcome — every standard vector is locked
+- **UART serial console:** works (115200, full boot log) but lands at an Ubuntu 16.04 `login:` with **unknown creds** (~40 combos incl. root/rock/linaro/firefly/meural/ubuntu all rejected).
+- **U-Boot interrupt:** `bootdelay=0` and no `CONFIG_ZERO_BOOTDELAY_CHECK` — it prints "Hit any key" but never reads one. A pre-buffered key flood never stopped it.
+- **MaskROM + `rkdeveloptool`:** fails on everything but "list devices" (signed-loader lock) — so even a **read/dump is blocked**, not just writes. Independently confirmed by another owner.
+- **SD-card boot:** won't boot.
+
+## If we ever revisit it (lower-effort first)
+1. **CakePHP / `/remote` RCE (no hardware needed):** the local web stack is CakePHP + shell scripts on an old Ubuntu. Fuzz `/remote/*` for command injection (shell metachars in the `change_gallery` id, the postcard filename field) and known CakePHP CVEs. This is the cheapest try — pure software, no opening the case.
+2. **eMMC ISP / chip-off (hardware):** secure boot stops at the kernel, not the ext4 rootfs — so bypass the SoC entirely: wire the eMMC CLK/CMD/DAT0/GND to a USB SD reader, mount the rootfs, edit `/etc/shadow`, write back. **Prerequisite we have NOT confirmed:** that those eMMC lines are exposed as probeable test points. If they're buried BGA, it's a full chip-off — a big difficulty jump.
 
 **Two paths, try in this order:**
 1. **Root the Meural's own Linux (non-destructive, BEST)** — it's a Rockchip RK3288 board running Ubuntu 14.04 with a framebuffer + local web server. Get a shell, disable the Meural app, run a tiny "show this JPEG on the framebuffer" loop fed by our existing `meural-push` screenshots. Keeps 100% of the hardware. ← **this doc**

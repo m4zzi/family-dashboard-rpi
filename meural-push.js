@@ -11,7 +11,14 @@ const { meural: mc, gatus: gatusCfg } = require('./config');
 const COGNITO_URL     = `https://cognito-idp.${mc.cognitoRegion}.amazonaws.com/`;
 const API_BASE        = 'https://api.meural.com/v0';
 const PORTRAIT_URL    = (mc.portraitUrl || 'http://localhost:3000') + '/portrait.html';
-const COUNT           = parseInt(process.argv[2]) || 6;
+const COUNT           = parseInt(process.argv[2]) || 1;
+// Meural shows a postcard as a "preview" governed by previewDuration (default 60s →
+// it reverts after a minute). Pin preview/image/overlay durations high so a postcard
+// HOLDS until the next push. (Applied by the frame at boot; re-set every run so a
+// reset/firmware update can't silently drift it back to 60s.)
+const HOLD_DURATION   = 86400; // 24h
+const API_TIMEOUT     = 20_000; // ms — never let a sick Meural backend black-hole a run
+const LOCK_FILE       = path.join(__dirname, '.meural-push.lock');
 const SNAPSHOT_DIR    = __dirname;
 const snapshotPath    = (i) => path.join(SNAPSHOT_DIR, `_meural-snapshot-${i}.jpg`);
 const sleep           = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -23,7 +30,8 @@ const sleep           = (ms) => new Promise((r) => setTimeout(r, ms));
 // current, and neither a reboot nor a gallery-bounce cleared it. Force manually
 // with a `resync` arg:  node meural-push.js 6 resync
 const NIGHTLY_RESYNC_HOUR = 22;
-const RESYNC          = process.argv.slice(2).includes('resync') || new Date().getHours() === NIGHTLY_RESYNC_HOUR;
+const RESYNC          = process.argv.slice(2).includes('resync') ||
+  (new Date().getHours() === NIGHTLY_RESYNC_HOUR && new Date().getMinutes() < 15); // once/night even at */15 cadence
 
 // ── Cognito auth ──────────────────────────────────────────────────────────────
 async function getToken() {
@@ -38,6 +46,7 @@ async function getToken() {
       ClientId: mc.cognitoClientId,
       AuthParameters: { USERNAME: mc.email, PASSWORD: mc.password },
     }),
+    signal: AbortSignal.timeout(API_TIMEOUT),
   });
   if (!res.ok) throw new Error(`Auth failed: ${res.status} ${await res.text()}`);
   const { AuthenticationResult } = await res.json();
@@ -50,7 +59,7 @@ function headers(token, extra = {}) {
 }
 
 async function apiGet(token, p) {
-  const res = await fetch(`${API_BASE}${p}`, { headers: headers(token) });
+  const res = await fetch(`${API_BASE}${p}`, { headers: headers(token), signal: AbortSignal.timeout(API_TIMEOUT) });
   if (!res.ok) throw new Error(`GET ${p}: ${res.status}`);
   return (await res.json()).data;
 }
@@ -61,27 +70,54 @@ async function apiPost(token, p, body) {
     method: 'POST',
     headers: headers(token, isForm ? {} : { 'content-type': 'application/json' }),
     body: isForm ? body : JSON.stringify(body),
+    signal: AbortSignal.timeout(API_TIMEOUT),
   });
   if (!res.ok) throw new Error(`POST ${p}: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
 async function apiDelete(token, p) {
-  const res = await fetch(`${API_BASE}${p}`, { method: 'DELETE', headers: headers(token) });
+  const res = await fetch(`${API_BASE}${p}`, { method: 'DELETE', headers: headers(token), signal: AbortSignal.timeout(API_TIMEOUT) });
   // 404 = already gone, that's fine
   if (!res.ok && res.status !== 404) throw new Error(`DELETE ${p}: ${res.status}`);
+}
+
+// ── Pin display durations so a postcard persists (the bridge while cloud is down) ──
+// Idempotent: re-applied each run. Takes effect on the frame at its NEXT boot — but
+// keeping the saved value at 86400 means any reboot (power blip, update) applies it.
+async function setHoldDurations(token) {
+  for (const d of mc.devices) {
+    if (!d.id) continue;
+    try {
+      const body = new URLSearchParams({
+        previewDuration: String(HOLD_DURATION),
+        imageDuration:   String(HOLD_DURATION),
+        overlayDuration: String(HOLD_DURATION),
+      });
+      const res = await fetch(`${API_BASE}/devices/${d.id}`, {
+        method: 'PUT',
+        headers: headers(token, { 'content-type': 'application/x-www-form-urlencoded' }),
+        body,
+        signal: AbortSignal.timeout(10_000),
+      });
+      console.log(`  ${d.name}: durations ${res.ok ? 'pinned' : `HTTP ${res.status}`}`);
+    } catch (e) { console.warn(`  ${d.name}: durations failed: ${e.message}`); }
+  }
 }
 
 // ── Gallery: find/create, remove duplicates, collect existing item IDs ────────
 async function prepareGallery(token) {
   const all = await apiGet(token, '/user/galleries?count=1000');
-  const matches = all.filter(g => g.name === mc.galleryName);
+  // Sort populated-first so dedup keeps the gallery WITH items, not an empty stray
+  // that happened to sort first (the API order is arbitrary).
+  const itemsOf = (g) => g.itemCount ?? g.imageCount ?? g.count ?? 0;
+  const matches = all.filter(g => g.name === mc.galleryName).sort((a, b) => itemsOf(b) - itemsOf(a));
 
   if (matches.length > 1) {
-    console.log(`Found ${matches.length} "${mc.galleryName}" galleries — removing duplicates`);
+    console.log(`Found ${matches.length} "${mc.galleryName}" galleries — keeping the populated one, removing duplicates`);
     for (const g of matches.slice(1)) {
       await apiDelete(token, `/galleries/${g.id}`);
-      console.log(`  deleted gallery ${g.id}`);
+      console.log(`  deleted gallery ${g.id} (${itemsOf(g)} items)`);
     }
   }
 
@@ -168,6 +204,7 @@ async function uploadItem(token, filePath, label) {
     method: 'POST',
     headers: headers(token),
     body: form,
+    signal: AbortSignal.timeout(API_TIMEOUT),
   });
   if (!res.ok) throw new Error(`Upload failed: ${res.status} ${await res.text()}`);
   const { data } = await res.json();
@@ -175,67 +212,31 @@ async function uploadItem(token, filePath, label) {
   return data.id;
 }
 
-// ── Push to devices: postcard (LOCAL, reliable) + optional gallery assign/pin ───
-// The postcard goes straight to each frame's local API and bypasses Meural's
-// cloud entirely — it's the dependable display path. The gallery assign + re-pin
-// only run when the cloud upload SUCCEEDED (cloudOk): they make the new content
-// persistent across rotation. When the cloud is down the gallery is stale, so we
-// must NOT re-pin (it would replace the fresh postcard with old gallery content)
-// — we just leave the postcard showing.
-async function pushToDevices(token, galleryId, postcardPath, cloudOk = true) {
+// ── Push to devices: postcard ONLY (the live display path) ─────────────────────
+// The postcard goes straight to each frame's local API, bypasses Meural's cloud,
+// and HOLDS because previewDuration is pinned to 24h (see setHoldDurations). It is
+// the display, full stop. We deliberately do NOT assign/sync/change_gallery the
+// device here, even when the cloud upload succeeded: doing so switches the frame to
+// the gallery and — because the device sync is async — it lands on the OLD, not-yet-
+// downloaded item and (with imageDuration pinned to 24h) sits there for a full day,
+// silently defeating the fresh postcard. (Caught in peer review, 2026-06-18.) The
+// cloud gallery is still kept populated by main() as a backup for if/when we switch
+// back to gallery mode, but it is not what's shown. Returns # of frames delivered.
+async function pushToDevices(postcardPath) {
+  let delivered = 0;
   for (const device of mc.devices) {
-    console.log(`\n--- ${device.name} (id: ${device.id}) ---`);
-
-    if (cloudOk) {
-      try {
-        await fetch(`${API_BASE}/devices/${device.id}/galleries/${galleryId}`, {
-          method: 'POST', headers: headers(token),
-        });
-        console.log(`  ✓ Gallery ${galleryId} assigned`);
-      } catch (e) { console.warn(`  assign: ${e.message}`); }
-
-      try {
-        await fetch(`${API_BASE}/devices/${device.id}/sync`, {
-          method: 'POST', headers: headers(token),
-        });
-        console.log('  ✓ Sync triggered');
-      } catch (e) { console.warn(`  sync: ${e.message}`); }
-    }
-
-    // Postcard = the reliable local display path. ALWAYS runs (cloud-independent).
+    console.log(`\n--- ${device.name} (${device.ip}) ---`);
     try {
       const form = new FormData();
       form.append('photo', new Blob([fs.readFileSync(postcardPath)], { type: 'image/jpeg' }), 'dashboard.jpg');
       const res = await fetch(`http://${device.ip}/remote/postcard`, {
         method: 'POST', body: form, signal: AbortSignal.timeout(20_000),
       });
-      console.log(`  ✓ Postcard: ${res.ok ? 'showing now' : `HTTP ${res.status}`}`);
-    } catch (e) { console.warn(`  postcard: ${e.message}`); }
-
-    if (cloudOk) {
-      // Pin to the freshly-updated gallery so the postcard doesn't drift back to
-      // other galleries / stale cached items after a wifi blip (change_gallery
-      // forces a re-pull). Only safe when the upload succeeded.
-      try {
-        await fetch(`http://${device.ip}/remote/control_command/change_gallery/${galleryId}`, {
-          signal: AbortSignal.timeout(10_000),
-        });
-        await fetch(`http://${device.ip}/remote/control_command/resume`, {
-          signal: AbortSignal.timeout(10_000),
-        });
-        console.log(`  ✓ Pinned to gallery ${galleryId}`);
-      } catch (e) { console.warn(`  pin: ${e.message}`); }
-    } else {
-      // Cloud down (Meural /items 500ing): we sent the postcard above as a
-      // best-effort instant-display, but do NOTHING to playback. Lessons learned
-      // the hard way: `resume` cycles the stale gallery, and `pause` FREEZES the
-      // frame so it won't pick up later postcards/recovery. So leave the frame on
-      // its normal slideshow — it shows the last good gallery item until Meural's
-      // upload recovers (the best-effort upload above grabs the next working
-      // window and re-pins fresh content automatically).
-      console.log('  · cloud down — postcard sent, leaving slideshow alone (auto-recovers on upload)');
-    }
+      if (res.ok) { delivered++; console.log('  ✓ Postcard delivered (holds via 24h previewDuration)'); }
+      else console.warn(`  ✗ Postcard HTTP ${res.status}`);
+    } catch (e) { console.warn(`  ✗ postcard failed: ${e.message}`); }
   }
+  return delivered;
 }
 
 // ── Nightly full resync: purge + re-pull each frame's LOCAL gallery cache ──────
@@ -263,76 +264,104 @@ async function resyncDevices(token, galleryId) {
   }
 }
 
+// ── Gatus heartbeat (no-op unless that endpoint is configured) ─────────────────
+async function sendHeartbeat(pushUrl, token, success, label) {
+  if (!pushUrl || !token) return;
+  try {
+    const url = /[?&]success=/.test(pushUrl)
+      ? pushUrl.replace(/([?&]success=)[^&]*/, `$1${success}`)
+      : pushUrl + (pushUrl.includes('?') ? '&' : '?') + `success=${success}`;
+    const res = await fetch(url, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000),
+    });
+    console.log(`Heartbeat ${label}=${success}: ${res.ok ? 'sent' : `HTTP ${res.status}`}`);
+  } catch (e) { console.warn(`Heartbeat ${label} failed: ${e.message}`); }
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
-  console.log(`=== Meural Push (${COUNT} shots) ===\n`);
-
-  console.log('Authenticating...');
-  const token = await getToken();
-  console.log('✓ Authenticated\n');
-
-  const { galleryId, oldItemIds } = await prepareGallery(token);
-  console.log();
-
-  const snapPaths = await takeScreenshots(COUNT);
-  console.log();
-
-  // Cloud gallery upload is BEST-EFFORT: Meural's cloud intermittently 500s on
-  // image uploads (their backend), and a cloud failure must NOT abort the run —
-  // the local postcard below is what actually keeps the frames current. Count
-  // successes so the rest of the run knows whether the cloud is usable.
-  console.log(`Uploading ${snapPaths.length} image(s) to the cloud gallery (best-effort)...`);
-  let uploaded = 0;
-  for (let i = 0; i < snapPaths.length; i++) {
-    try {
-      const itemId = await uploadItem(token, snapPaths[i], `[${i + 1}/${snapPaths.length}]`);
-      await fetch(`${API_BASE}/galleries/${galleryId}/items/${itemId}`, {
-        method: 'POST', headers: headers(token),
-      }).catch((e) => console.warn(`  add to gallery: ${e.message}`));
-      uploaded++;
-    } catch (e) { console.warn(`  cloud upload [${i + 1}] failed (continuing): ${e.message}`); }
+  // Overlap guard: a hung cloud call plus the 15-min cron could otherwise stack two
+  // runs racing on the same gallery. A lock older than 10 min is treated as stale.
+  if (fs.existsSync(LOCK_FILE)) {
+    const ageMs = Date.now() - fs.statSync(LOCK_FILE).mtimeMs;
+    if (ageMs < 10 * 60_000) {
+      console.log(`Another meural-push run is active (lock ${Math.round(ageMs / 1000)}s old) — exiting.`);
+      return;
+    }
+    console.warn(`Stale lock (${Math.round(ageMs / 1000)}s old) — overriding.`);
   }
-  const cloudOk = uploaded > 0;
-  console.log(cloudOk
-    ? `✓ ${uploaded}/${snapPaths.length} item(s) in gallery`
-    : '⚠ cloud upload unavailable (Meural 500?) — delivering postcards only this run');
+  fs.writeFileSync(LOCK_FILE, String(process.pid));
 
-  // Postcard always goes out (local path); gallery assign/pin only when cloudOk.
-  await pushToDevices(token, galleryId, snapPaths[0], cloudOk);
+  let snapPaths = [];
+  try {
+    console.log(`=== Meural Push (${COUNT} shots) ===\n`);
 
-  // Gallery housekeeping only makes sense when the cloud is working — otherwise
-  // we'd be clearing/re-pulling a stale gallery on top of a good postcard.
-  if (cloudOk) {
-    // Delete old items now that new content is live.
-    await clearOldItems(token, oldItemIds);
-    // Last run of the night: purge + re-pull each frame's local cache.
-    if (RESYNC) await resyncDevices(token, galleryId);
-  }
+    console.log('Authenticating...');
+    const token = await getToken();
+    console.log('✓ Authenticated\n');
 
-  // Clean up local snapshot files
-  for (const p of snapPaths) fs.unlinkSync(p);
+    // Pin display durations so the postcard holds (no 60s revert). Idempotent.
+    // NOTE: the frame only applies a changed previewDuration at its NEXT boot — a
+    // sync isn't enough and the device API readback always shows the saved value, so
+    // this can't be verified from here. A frame must be power-cycled once after the
+    // value first changes; thereafter this keeps it pinned against drift.
+    console.log('Pinning display durations...');
+    await setHoldDurations(token);
+    console.log();
 
-  console.log('\n=== Done ===');
+    const { galleryId, oldItemIds } = await prepareGallery(token);
+    console.log();
 
-  // Monitoring heartbeat (optional `gatus` block in config.js). Reports the REAL
-  // health signal — cloudOk — not just "the script ran". success=true only when the
-  // cloud upload landed fresh persistent content; a cloud-down run pushes
-  // success=false (red bar = frames stranded on the last good upload), and total
-  // silence (Pi/script dead) still trips Gatus's heartbeat window. We override the
-  // success= baked into pushUrl so the bar reflects whether frames are actually current.
-  if (gatusCfg?.pushUrl && gatusCfg?.token) {
-    try {
-      const base = gatusCfg.pushUrl;
-      const url = /[?&]success=/.test(base)
-        ? base.replace(/([?&]success=)[^&]*/, `$1${cloudOk}`)
-        : base + (base.includes('?') ? '&' : '?') + `success=${cloudOk}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${gatusCfg.token}` },
-        signal: AbortSignal.timeout(10_000),
-      });
-      console.log(`Monitoring heartbeat: ${res.ok ? `sent (cloudOk=${cloudOk})` : `HTTP ${res.status}`}`);
-    } catch (e) { console.warn(`Monitoring heartbeat failed: ${e.message}`); }
+    snapPaths = await takeScreenshots(COUNT);
+    console.log();
+
+    // Cloud gallery upload is the INTENDED path but Meural's backend currently 500s on
+    // every real image. Treat the FIRST upload as a probe: one failure = cloud is down,
+    // so stop and let the postcard carry the run. If it succeeds, Meural recovered —
+    // keep the gallery populated as a backup (but the postcard is still what's shown).
+    console.log('Probing cloud upload (1 failure → fall back to postcard)...');
+    let uploaded = 0;
+    for (let i = 0; i < snapPaths.length; i++) {
+      try {
+        const itemId = await uploadItem(token, snapPaths[i], `[${i + 1}/${snapPaths.length}]`);
+        await fetch(`${API_BASE}/galleries/${galleryId}/items/${itemId}`, {
+          method: 'POST', headers: headers(token), signal: AbortSignal.timeout(API_TIMEOUT),
+        }).catch((e) => console.warn(`  add to gallery: ${e.message}`));
+        uploaded++;
+      } catch (e) {
+        console.warn(`  cloud upload failed → postcard fallback: ${e.message.slice(0, 70)}`);
+        break;   // one failure = cloud down; don't hammer the remaining shots
+      }
+    }
+    const cloudOk = uploaded > 0;
+    console.log(cloudOk
+      ? `✓ cloud is UP — ${uploaded} item(s) in gallery (Meural recovered)`
+      : '⚠ cloud down (Meural 500) — postcard is carrying the dashboard this run');
+
+    // Postcard is the live display (always, cloud-independent). # frames that took it.
+    const delivered = await pushToDevices(snapPaths[0]);
+    const framesOk = delivered === mc.devices.length;
+    console.log(`\nFrames delivered: ${delivered}/${mc.devices.length}${framesOk ? '' : '  ⚠ a frame did NOT take the postcard'}`);
+
+    // Cloud gallery housekeeping only when the cloud is actually up.
+    if (cloudOk) {
+      await clearOldItems(token, oldItemIds);
+      if (RESYNC) await resyncDevices(token, galleryId);
+    }
+
+    console.log('\n=== Done ===');
+
+    // TWO independent signals (peer-review recommendation):
+    //  • framesOk → PRIMARY: did the dashboard actually reach the frames this run?
+    //              Green even while Meural's cloud is broken. Post to gatus.framesPushUrl.
+    //  • cloudOk  → "is Meural fixed yet?" watch; stays RED through the outage.
+    //              Posts to the existing gatus.pushUrl (unchanged behavior).
+    // Each is a no-op until its endpoint is set in config.js, so this is backward-compatible.
+    await sendHeartbeat(gatusCfg?.framesPushUrl, gatusCfg?.token, framesOk, 'framesOk');
+    await sendHeartbeat(gatusCfg?.pushUrl, gatusCfg?.token, cloudOk, 'cloudOk');
+  } finally {
+    for (const p of snapPaths) { try { fs.unlinkSync(p); } catch { /* already gone */ } }
+    try { fs.unlinkSync(LOCK_FILE); } catch { /* already gone */ }
   }
 }
 
