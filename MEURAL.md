@@ -44,7 +44,7 @@ The **nightly 22:00 run** does this purge automatically (`NIGHTLY_RESYNC_HOUR`) 
 ### 2. All frames stale by a day or two + a manual push prints `Fatal: Upload failed: 500`
 **Meural's cloud upload API is down — their side.** `POST /items` returns a 500 HTML gateway page for real images, while a 1×1 test pixel still returns 201 (so auth/account are fine; their image-ingestion backend is broken). **Not our code.**
 
-**As of commit `9fcefc1` this is handled gracefully** — the run no longer Fatals; it logs `cloud upload … failed (continuing)`, delivers postcards, and skips the gallery re-pin (so frames stay current via postcard). Nothing to fix on our end; it auto-resumes when Meural recovers.
+**Handled gracefully** — the run no longer Fatals; it logs `cloud upload … failed (continuing)`, attempts a postcard, and leaves playback alone. **But be clear-eyed: during the outage the frames CANNOT be kept current.** Postcards are *transient* and can't override the stuck gallery — proven 2026-06-18: with a 1-item stale gallery, the frame just sits on that item; `resume` cycles back to it, and `pause` *freezes* the frame so it won't take later postcards. So the frames show the **last successful upload** until Meural's `/items` recovers — then the hourly best-effort upload grabs the next working window, updates the gallery, and the frames refresh on their own. The cloud is **intermittent** (it worked briefly mid-day 6/17), so recovery can come at any cron tick. Nothing to fix on our end; just wait for their backend.
 
 **Check if Meural recovered:**
 ```bash
@@ -61,14 +61,14 @@ ssh coffee-display "pm2 logs family-display --lines 30 --nostream"
 ssh coffee-display "curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/portrait.html"   # want 200
 ```
 
-## Resilience design (why a Meural cloud outage no longer blanks the frames)
+## Resilience design (what the script does when Meural's cloud is flaky)
 
 `meural-push.js` `main()`:
-1. **Best-effort cloud upload** — each item in a `try/catch`; a 500 logs and continues (never `process.exit`). Counts successes → `cloudOk`.
-2. **Always `pushToDevices(..., cloudOk)`** — the postcard fires unconditionally (local path). The gallery assign + sync + re-pin run **only when `cloudOk`** — re-pinning to a stale gallery while the cloud is down would replace the fresh postcard with old content, so we don't.
-3. **`clearOldItems` + nightly `resyncDevices`** run **only when `cloudOk`** — no point churning a stale gallery.
+1. **Best-effort cloud upload** — each item in a `try/catch`; a 500 logs and continues (never `process.exit`). Counts successes → `cloudOk`. **This is the part that matters** — it auto-grabs the next working cloud window, updates the gallery, and re-pins fresh content with no intervention.
+2. **`pushToDevices(..., cloudOk)`** — when `cloudOk`: assign + sync + re-pin to the fresh gallery (frames update). When **not** `cloudOk`: send a best-effort postcard but **touch nothing else** — do NOT `resume` (cycles the stale gallery) and do NOT `pause` (freezes the frame so it ignores later updates). Leave the slideshow alone.
+3. **`clearOldItems` + nightly `resyncDevices`** run **only when `cloudOk`**.
 
-So: frames track the dashboard hourly via postcards through any Meural cloud outage, and full persistent gallery uploads auto-resume the moment `/items` returns 201 again.
+**Honest limitation:** a postcard cannot keep frames current during a cloud outage — it's transient and can't hold against the persistent gallery. So during an outage the frames sit on the last good upload; they refresh automatically when Meural's `/items` returns 201 (any cron tick). Don't try to force it with pause/resume — both backfire (see failure mode #2).
 
 ## Pre-flight (if a push misbehaves)
 ```bash

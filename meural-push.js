@@ -207,7 +207,7 @@ async function pushToDevices(token, galleryId, postcardPath, cloudOk = true) {
       const form = new FormData();
       form.append('photo', new Blob([fs.readFileSync(postcardPath)], { type: 'image/jpeg' }), 'dashboard.jpg');
       const res = await fetch(`http://${device.ip}/remote/postcard`, {
-        method: 'POST', body: form, signal: AbortSignal.timeout(8_000),
+        method: 'POST', body: form, signal: AbortSignal.timeout(20_000),
       });
       console.log(`  ✓ Postcard: ${res.ok ? 'showing now' : `HTTP ${res.status}`}`);
     } catch (e) { console.warn(`  postcard: ${e.message}`); }
@@ -226,14 +226,14 @@ async function pushToDevices(token, galleryId, postcardPath, cloudOk = true) {
         console.log(`  ✓ Pinned to gallery ${galleryId}`);
       } catch (e) { console.warn(`  pin: ${e.message}`); }
     } else {
-      // Cloud down: just make sure the postcard is the thing showing; do NOT
-      // re-pin to the stale gallery.
-      try {
-        await fetch(`http://${device.ip}/remote/control_command/resume`, {
-          signal: AbortSignal.timeout(10_000),
-        });
-        console.log('  ✓ Postcard left showing (cloud down — gallery not re-pinned)');
-      } catch (e) { console.warn(`  resume: ${e.message}`); }
+      // Cloud down (Meural /items 500ing): we sent the postcard above as a
+      // best-effort instant-display, but do NOTHING to playback. Lessons learned
+      // the hard way: `resume` cycles the stale gallery, and `pause` FREEZES the
+      // frame so it won't pick up later postcards/recovery. So leave the frame on
+      // its normal slideshow — it shows the last good gallery item until Meural's
+      // upload recovers (the best-effort upload above grabs the next working
+      // window and re-pins fresh content automatically).
+      console.log('  · cloud down — postcard sent, leaving slideshow alone (auto-recovers on upload)');
     }
   }
 }
