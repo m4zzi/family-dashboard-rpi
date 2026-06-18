@@ -61,6 +61,13 @@ This is the insurance policy: a byte-for-byte image we can always restore, *and*
   - **T (TX, device→us):** idle ~3.3 V, **dips/flickers during boot** as it spews the log → this is the one we read. Idle voltage confirms 3.3 V logic.
   - **R (RX, us→device):** steady high, no boot flicker.
 
+## Step 2b — can't read the RX/TX labels? Sweep for TX with the Flipper (deterministic)
+Our board (rev `U121397`) has many `TP##` pads and the debug breakout is a **row of ~5–6 round pads just above the hot-glued power/speaker connector** (near the wifi shield + the barcode sticker) — plus the `GND_TP1`/`VCC_IO_TP3` cluster by the SoC. Labels are sub-millimeter; don't bother reading them, find TX by its behavior:
+1. Find **GND** by continuity to the shield frame / a mounting screw (any `GND_TP` pad).
+2. Wire Flipper **GND → board GND** and Flipper **pin 14 (RX) → a flying probe wire**. Open the USB-UART bridge @ 115200 + `picocom` (Steps 4).
+3. **Power on the board and touch the probe to each unknown pad in turn.** The pad that makes a **readable boot log scroll** in picocom is **TX** — only the UART TX spews ASCII at boot, so this disambiguates it from I²C/JTAG/test pads instantly.
+4. **RX** is almost always the pad immediately adjacent to TX in the same row. Confirm it in Step 6 by typing once you've added Flipper TX.
+
 ## Step 3 — wire the Flipper (RX + GND ONLY for now)
 - Flipper **pin 14 (RX)** → Meural **T (TX)**
 - Flipper **pin 8/11/18 (GND)** → Meural **G (GND)**
