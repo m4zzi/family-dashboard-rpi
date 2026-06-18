@@ -7,7 +7,7 @@ How the family dashboard gets onto the two Meural Canvas II frames, and what to 
 ## The setup
 
 - **Script:** `~/family-display/meural-push.js` on the Pi (`coffee-display`, `192.168.2.164`), run **every 15 min** by pm2 cron `*/15 5-22 * * *` (5 AM–10 PM). Manual: `ssh coffee-display "cd ~/family-display && node meural-push.js"` (optional arg = screenshot count, default **1**).
-- **Frames** — on the **IOT VLAN `192.168.3.x`**, so reachable **only from the Pi**, not the Mac:
+- **Frames** — on the **IOT subnet `192.168.3.x`**. Verified 2026-06-18 against UniFi: this network's `firewall_zone_id` is the **Internal** zone (same as the `.2` LAN), `network_isolation_enabled: false` — so it is **NOT firewall-isolated** and is reachable from any internal host (Mac or Pi). The Pi is just where the cron happens to run. *(Earlier docs wrongly said "only from the Pi" — there was never a Pi-specific rule. TODO/low-priority: actually isolate `.3` from `.2` with a dedicated zone.)*
 
   | Frame | Model | IP | device id |
   |---|---|---|---|
