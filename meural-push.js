@@ -314,17 +314,24 @@ async function main() {
 
   console.log('\n=== Done ===');
 
-  // Success-only monitoring heartbeat (optional `gatus` block in config.js).
-  // Reached only when the whole push completed — a failed run skips it, and the
-  // monitor's heartbeat window flags the silence.
+  // Monitoring heartbeat (optional `gatus` block in config.js). Reports the REAL
+  // health signal — cloudOk — not just "the script ran". success=true only when the
+  // cloud upload landed fresh persistent content; a cloud-down run pushes
+  // success=false (red bar = frames stranded on the last good upload), and total
+  // silence (Pi/script dead) still trips Gatus's heartbeat window. We override the
+  // success= baked into pushUrl so the bar reflects whether frames are actually current.
   if (gatusCfg?.pushUrl && gatusCfg?.token) {
     try {
-      const res = await fetch(gatusCfg.pushUrl, {
+      const base = gatusCfg.pushUrl;
+      const url = /[?&]success=/.test(base)
+        ? base.replace(/([?&]success=)[^&]*/, `$1${cloudOk}`)
+        : base + (base.includes('?') ? '&' : '?') + `success=${cloudOk}`;
+      const res = await fetch(url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${gatusCfg.token}` },
         signal: AbortSignal.timeout(10_000),
       });
-      console.log(`Monitoring heartbeat: ${res.ok ? 'sent' : `HTTP ${res.status}`}`);
+      console.log(`Monitoring heartbeat: ${res.ok ? `sent (cloudOk=${cloudOk})` : `HTTP ${res.status}`}`);
     } catch (e) { console.warn(`Monitoring heartbeat failed: ${e.message}`); }
   }
 }
