@@ -11,7 +11,7 @@ Both paths run the **same software** (a framebuffer JPEG display fed by the dash
 ---
 
 ## Hardware — what's confirmed vs. inherited from the teardown report
-- **SoC:** Rockchip — the teardown unit was **RK3288**, but **OUR board is a newer rev (`U121397 REV.0 GP`) and the SoC is hidden under the EMI shield — NOT visually confirmed.** It may be a newer Rockchip (RK3399/RK356x). **ID it before assuming RK3288 specifics:** either read the chip after lifting the shield can, or (cleaner) enter MaskROM and read the USB VID:PID (`2207:320b`=RK3288, `2207:330c`=RK3399, `2207:350a/b`=RK356x…) — `rkdeveloptool` also prints the chip. Baud is 115200 across the Rockchip line, so the UART procedure is unchanged regardless.
+- **SoC:** Rockchip **RK3288** — **CONFIRMED 2026-06-18** by lifting the EMI shield on our unit (board rev `U121397 REV.0 GP 803219`); chip is marked `Rockchip RK3288`, flanked by 4 DDR3 chips, eMMC/`VP6014` nearby. Same SoC as the teardown, newer board rev. 3.3 V logic → Flipper-safe UART, no level shifter. MaskROM USB VID:PID = `2207:320b`; `rkdeveloptool` works. Console baud 115200.
 - **OS / app:** teardown reported **Ubuntu 14.04 ARM** + a **CakePHP + shell-script** Meural app; likely similar on ours but confirm once we're in. Small eMMC/flash either way.
 - **Two identical frames:** the rootfs image is the same across both (same model/firmware), so the twin is a **reference/restore source for system partitions** — but each unit's MAC/serial/cloud-keys/calibration live in a per-device NVRAM/idblock, so don't clone a whole image unit-to-unit. Since we root **in-place (no reflash)**, a pre-dump is optional insurance, not required.
 - **Two access doors, both confirmed working by a teardown:**
