@@ -56,22 +56,24 @@ package.json
 ## Meural portrait pipeline
 > **Operations runbook: [`MEURAL.md`](MEURAL.md)** — the two delivery paths, the three failure modes + how to tell them apart, and the postcard-resilience design. Read that first when a frame shows the wrong thing.
 
-`meural-push.js` runs on the Pi hourly via PM2 cron (`0 5-22 * * *`, 5am–10pm):
-1. Cognito auth → find/dedup "Dashboard" gallery → clear old items
+`meural-push.js` runs on the Pi every 15 min via PM2 cron (`*/15 5-22 * * *`, 5am–10pm). **The local postcard is the live display (primary); the cloud gallery is a dormant backup** — see [`MEURAL.md`](MEURAL.md) for the full model. Each run:
+1. Cognito auth → pin `previewDuration`/`imageDuration` to 24h so the postcard holds → find/dedup "Dashboard" gallery
 2. Take N screenshots of `/portrait.html` via Puppeteer (waits for `data-ready`)
-3. Upload each to Meural cloud → add to gallery
-4. Assign gallery + sync on each device
-5. Local postcard push to each device IP for immediate display
+3. **Probe** the cloud upload (one shot) — success ⇒ keep the gallery populated as backup; first 500 ⇒ fall back (Meural's `/items` has been broken since ~2026-06-15, mode #2)
+4. **Postcard each frame** (`http://{device.ip}/remote/postcard`) = the live display, cloud-independent
+5. Two heartbeats — `framesOk` (did the postcard reach both frames) + `cloudOk` (is Meural's upload fixed yet); gallery housekeeping + nightly resync only run when the cloud is up
 
-- Run manually: `node meural-push.js 6`
+> The script deliberately does **not** assign-gallery + sync the device anymore (removed 2026-06-18 peer review): the async sync raced the postcard and could pin a stale item for 24h.
+
+- Run manually: `node meural-push.js` (optional arg = screenshot count, default 1)
 - Logs: `pm2 logs meural-push`
 - Uses `puppeteer-core` + system `/usr/bin/chromium` on Pi; `puppeteer` on Mac
-- Config: `config.js` → `meural` block (`email`, `password`, `devices`, `chromiumPath`, `portraitUrl`)
+- Config: `config.js` → `meural` block (`email`, `password`, `devices`, `chromiumPath`, `portraitUrl`) + `gatus` block (heartbeat URLs)
 
 ### Call architecture
-- **All gallery management** (auth, create/clear gallery, upload items, assign gallery, sync) → Meural cloud API at `api.meural.com/v0`
-- **Postcard only** → direct HTTP to `http://{device.ip}/remote/postcard` on the local network
-- Cloud sync is unreliable for timing; the local postcard is the real "show it now" mechanism — if postcard fails, the frame will eventually sync via cloud but may lag by minutes
+- **Postcard (primary, live display)** → direct HTTP `POST http://{device.ip}/remote/postcard` on the local network — no cloud, no auth, no size limit
+- **Gallery management** (auth, create/clear gallery, upload items, sync) → Meural cloud API at `api.meural.com/v0` — backup path only; currently broken on `/items` (mode #2)
+- All `/remote/...` local device endpoints need no auth and work whenever the frame is powered + on-network (verified against the `ha-meural`/`pymeural` client)
 
 ## iCloud photo API flow
 1. POST `https://sharedstreams.icloud.com/{token}/sharedstreams/webstream` `{"streamCtag":null}`

@@ -16,6 +16,18 @@ How the family dashboard gets onto the two Meural Canvas II frames, and what to 
 
 - **Meural cloud API:** `https://api.meural.com/v0` (AWS Cognito auth). Creds + device list in `config.js` (gitignored) under the `meural` block. The "Dashboard" gallery id is looked up by name each run (it's been recreated, so don't hardcode it).
 
+## Monitoring (Gatus)
+
+Defined in the **observability** repo, `observability/gatus/config.yaml` — three endpoints, all in the `fyi` group. The two heartbeats are *pushed* by `meural-push.js` each run (the script POSTs `success=…` to the gatus push URLs held in `config.js` → `gatus` block: `framesPushUrl`, `pushUrl`, `token`; auth `GATUS_TOKEN_MEURAL` on the gatus side).
+
+| Gatus endpoint | Type | Interval | Green means | Red means |
+|---|---|---|---|---|
+| `meural-pi` | ICMP `192.168.2.164` | 5m | Pi is up | Pi offline / IP drift |
+| `meural-frames` | push heartbeat (`framesOk`) | 1h | **PRIMARY** — the postcard reached **both** frames this run. Green *even while the cloud is down.* | A frame didn't take the postcard, **or** total silence (~4 missed `*/15` pushes ⇒ Pi/script dead) |
+| `meural-push` | push heartbeat (`cloudOk`) | 26h | Meural's `/items` upload recovered | Meural cloud still 500ing (**expected** during the outage — *not* a real fault; check `meural-frames` for true dashboard health) **or** total silence |
+
+**Read it as:** `meural-frames` is the real "is the dashboard alive" signal; `meural-push` is just the "is Meural fixed yet" watch and is *supposed* to be red right now. A local `GET /remote/identify/` probe (no cloud, no auth) could later be added to catch a frame that's network-up but web-server-wedged — the ICMP check can't see that.
+
 ## Delivery — the key mental model
 
 | Path | How | State |
