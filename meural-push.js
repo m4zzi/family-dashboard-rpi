@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// meural-push.js — Clean up Dashboard gallery and push one fresh portrait screenshot
+// meural-push.js — Postcard a fresh portrait screenshot to each frame (the live
+// display); nightly (22:00 or `resync` arg) also back it up to the cloud gallery.
 // Usage: node meural-push.js
 // Requires: npm install puppeteer --save-dev  (first run only)
 'use strict';
@@ -23,8 +24,9 @@ const SNAPSHOT_DIR    = __dirname;
 const snapshotPath    = (i) => path.join(SNAPSHOT_DIR, `_meural-snapshot-${i}.jpg`);
 const sleep           = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Nightly full resync: the last cron run of the day (local hour 22 — schedule is
-// `0 5-22 * * *`) purges + re-pulls each frame's LOCAL gallery cache. Frames can
+// Nightly cloud run: the first tick of the last cron hour (22:00 — schedule is
+// `*/15 5-22 * * *`) gates ALL cloud gallery work — upload, cleanup, and the full
+// resync that purges + re-pulls each frame's LOCAL gallery cache. Frames can
 // silently stop honoring cloud item-deletes and hoard stale local snapshots — one
 // wedged a frame on a 3-week-old image while the cloud gallery was perfectly
 // current, and neither a reboot nor a gallery-bounce cleared it. Force manually
@@ -249,10 +251,14 @@ async function resyncDevices(token, galleryId) {
   for (const device of mc.devices) {
     console.log(`\n--- ${device.name} (id: ${device.id}) ---`);
     try {
-      await apiDelete(token, `/devices/${device.id}/galleries/${galleryId}`);
-      await fetch(`${API_BASE}/devices/${device.id}/sync`, { method: 'POST', headers: headers(token) });
-      console.log('  ✓ gallery removed + purge sync');
-      await sleep(8_000);   // let the frame act on the removal before re-adding
+      // Purge step is best-effort: DELETE 400s if the gallery isn't attached to the
+      // device (e.g. after a long cloud outage) — nothing to purge, go straight to add.
+      try {
+        await apiDelete(token, `/devices/${device.id}/galleries/${galleryId}`);
+        await fetch(`${API_BASE}/devices/${device.id}/sync`, { method: 'POST', headers: headers(token) });
+        console.log('  ✓ gallery removed + purge sync');
+        await sleep(8_000);   // let the frame act on the removal before re-adding
+      } catch (e) { console.warn(`  purge skipped (gallery not attached?): ${e.message}`); }
       await fetch(`${API_BASE}/devices/${device.id}/galleries/${galleryId}`, { method: 'POST', headers: headers(token) });
       await fetch(`${API_BASE}/devices/${device.id}/sync`, { method: 'POST', headers: headers(token) });
       console.log('  ✓ gallery re-added + re-pull sync');
@@ -309,44 +315,55 @@ async function main() {
     await setHoldDurations(token);
     console.log();
 
-    const { galleryId, oldItemIds } = await prepareGallery(token);
-    console.log();
-
     snapPaths = await takeScreenshots(COUNT);
     console.log();
 
-    // Cloud gallery upload is the INTENDED path but Meural's backend currently 500s on
-    // every real image. Treat the FIRST upload as a probe: one failure = cloud is down,
-    // so stop and let the postcard carry the run. If it succeeds, Meural recovered —
-    // keep the gallery populated as a backup (but the postcard is still what's shown).
-    console.log('Probing cloud upload (1 failure → fall back to postcard)...');
-    let uploaded = 0;
-    for (let i = 0; i < snapPaths.length; i++) {
-      try {
-        const itemId = await uploadItem(token, snapPaths[i], `[${i + 1}/${snapPaths.length}]`);
-        await fetch(`${API_BASE}/galleries/${galleryId}/items/${itemId}`, {
-          method: 'POST', headers: headers(token), signal: AbortSignal.timeout(API_TIMEOUT),
-        }).catch((e) => console.warn(`  add to gallery: ${e.message}`));
-        uploaded++;
-      } catch (e) {
-        console.warn(`  cloud upload failed → postcard fallback: ${e.message.slice(0, 70)}`);
-        break;   // one failure = cloud down; don't hammer the remaining shots
+    // Cloud gallery work runs NIGHTLY ONLY (the 22:00 tick, or a manual `resync` arg).
+    // The Dashboard gallery is assigned to both devices, so every cloud item add/delete
+    // pushes a sync event that kicks the frame out of the postcard preview and back to
+    // gallery art until the next cron tick — per-run uploads meant random old photos
+    // popping up all day (surfaced 2026-07-03, the day Meural's /items recovered; the
+    // outage had been masking it). One backup upload a day is plenty: the postcard is
+    // the display, the gallery is history. cloudOk: null = not probed this run.
+    let cloudOk = null;
+    let galleryId, oldItemIds;
+    if (RESYNC) {
+      ({ galleryId, oldItemIds } = await prepareGallery(token));
+      console.log();
+
+      // Meural's backend 500'd on every real image 6/15–7/3. Treat the FIRST upload as
+      // a probe: one failure = cloud is down, stop and let the postcard carry the run.
+      console.log('Probing cloud upload (1 failure → fall back to postcard)...');
+      let uploaded = 0;
+      for (let i = 0; i < snapPaths.length; i++) {
+        try {
+          const itemId = await uploadItem(token, snapPaths[i], `[${i + 1}/${snapPaths.length}]`);
+          await fetch(`${API_BASE}/galleries/${galleryId}/items/${itemId}`, {
+            method: 'POST', headers: headers(token), signal: AbortSignal.timeout(API_TIMEOUT),
+          }).catch((e) => console.warn(`  add to gallery: ${e.message}`));
+          uploaded++;
+        } catch (e) {
+          console.warn(`  cloud upload failed → postcard fallback: ${e.message.slice(0, 70)}`);
+          break;   // one failure = cloud down; don't hammer the remaining shots
+        }
       }
+      cloudOk = uploaded > 0;
+      console.log(cloudOk
+        ? `✓ cloud is UP — ${uploaded} item(s) in gallery`
+        : '⚠ cloud down (Meural 500) — postcard is carrying the dashboard this run');
     }
-    const cloudOk = uploaded > 0;
-    console.log(cloudOk
-      ? `✓ cloud is UP — ${uploaded} item(s) in gallery (Meural recovered)`
-      : '⚠ cloud down (Meural 500) — postcard is carrying the dashboard this run');
 
     // Postcard is the live display (always, cloud-independent). # frames that took it.
     const delivered = await pushToDevices(snapPaths[0]);
     const framesOk = delivered === mc.devices.length;
     console.log(`\nFrames delivered: ${delivered}/${mc.devices.length}${framesOk ? '' : '  ⚠ a frame did NOT take the postcard'}`);
 
-    // Cloud gallery housekeeping only when the cloud is actually up.
+    // Cloud gallery housekeeping only on probe runs where the cloud was actually up.
+    // (These add/delete/sync events pop the frames off the postcard preview — fine
+    // once a night at 22:00, when resync re-pins to the just-uploaded fresh image.)
     if (cloudOk) {
       await clearOldItems(token, oldItemIds);
-      if (RESYNC) await resyncDevices(token, galleryId);
+      await resyncDevices(token, galleryId);
     }
 
     console.log('\n=== Done ===');
@@ -354,11 +371,11 @@ async function main() {
     // TWO independent signals (peer-review recommendation):
     //  • framesOk → PRIMARY: did the dashboard actually reach the frames this run?
     //              Green even while Meural's cloud is broken. Post to gatus.framesPushUrl.
-    //  • cloudOk  → "is Meural fixed yet?" watch; stays RED through the outage.
-    //              Posts to the existing gatus.pushUrl (unchanged behavior).
+    //  • cloudOk  → "is Meural's upload path working?" watch — only probed on the
+    //              nightly run now, so it posts once a day (Gatus window is 26h).
     // Each is a no-op until its endpoint is set in config.js, so this is backward-compatible.
     await sendHeartbeat(gatusCfg?.framesPushUrl, gatusCfg?.token, framesOk, 'framesOk');
-    await sendHeartbeat(gatusCfg?.pushUrl, gatusCfg?.token, cloudOk, 'cloudOk');
+    if (cloudOk !== null) await sendHeartbeat(gatusCfg?.pushUrl, gatusCfg?.token, cloudOk, 'cloudOk');
   } finally {
     for (const p of snapPaths) { try { fs.unlinkSync(p); } catch { /* already gone */ } }
     try { fs.unlinkSync(LOCK_FILE); } catch { /* already gone */ }
