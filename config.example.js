@@ -55,12 +55,32 @@ module.exports = {
     calendar:  5 * 60 * 1000,   // 5 minutes
   },
 
+  // ── Meural digital frames (OPTIONAL — required by meural-push.js) ─────────
+  // Credentials for your Netgear Meural account (Cognito auth) plus the frames
+  // to push to. Placeholders only — real values go in config.js, never here.
+  // meural: {
+  //   email:           'you@example.com',
+  //   password:        'YOUR_MEURAL_PASSWORD',
+  //   cognitoClientId: '487bd4kvb1fnop6mbgk8gu5ibf',  // Meural's public Cognito app client
+  //   cognitoRegion:   'eu-west-1',
+  //   galleryName:     'Dashboard',        // cloud gallery managed by the nightly backup run
+  //   devices: [
+  //     { id: 12345, name: 'frame-1', ip: '192.168.x.x' },
+  //     { id: 67890, name: 'frame-2', ip: '192.168.x.x' },
+  //   ],
+  //   chromiumPath: '/usr/bin/chromium',   // Pi only — system Chromium for puppeteer-core
+  //   portraitUrl:  'http://localhost:3000',  // base URL for portrait screenshots (omit for default)
+  // },
+
   // ── Monitoring heartbeat (OPTIONAL) ──────────────────────────────────────
-  // If set, meural-push.js POSTs here after each fully-successful push run
-  // (Gatus external-endpoint with a heartbeat window — silence = alert).
+  // If set, meural-push.js POSTs here after each push run
+  // (Gatus external-endpoints with a heartbeat window — silence = alert).
+  // framesPushUrl = did the postcard reach every frame (PRIMARY heartbeat);
+  // pushUrl       = nightly cloud gallery backup result (cloudOk).
   // gatus: {
-  //   pushUrl: 'http://<gatus-host>:3001/api/v1/endpoints/<group>_<name>/external?success=true',
-  //   token:   '<bearer token>',
+  //   framesPushUrl: 'http://<gatus-host>:3001/api/v1/endpoints/<group>_<frames-name>/external?success=true',
+  //   pushUrl:       'http://<gatus-host>:3001/api/v1/endpoints/<group>_<cloud-name>/external?success=true',
+  //   token:         '<bearer token>',
   // },
 
   // ── Baby-cam overlay (OPTIONAL) ───────────────────────────────────────────

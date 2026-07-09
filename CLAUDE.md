@@ -37,6 +37,7 @@ server.js          — Express API + in-memory cache
 config.js          — GITIGNORED — all secrets live here
 config.example.js  — committed template (no secrets)
 meural-push.js     — Puppeteer screenshot + Meural cloud upload script
+meural-diag.js     — Meural /items upload diagnostic
 public/
   index.html       — dashboard markup (kiosk)
   style.css        — kiosk styles

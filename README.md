@@ -15,7 +15,7 @@ A full-screen family display built for a Raspberry Pi. Shows a rotating iCloud p
 - **Warm editorial design** — frosted glass panels, radial vignette, staggered entrance animations, Cormorant Garamond + DM Sans
 - **Touch-first** — all scrollable areas use a custom Pointer Events drag handler that works reliably on Linux/Wayland kiosk (CSS native scroll is unreliable in that environment)
 - **Kiosk-ready** — Chromium fullscreen autostart on boot via `.desktop` entry, PM2 for server persistence
-- **Meural digital frame support** — hourly auto-push of portrait snapshots to Netgear Meural frames (see below)
+- **Meural digital frame support** — every-15-min local postcard push of portrait snapshots to Netgear Meural frames, with a nightly cloud gallery backup (see below)
 
 ## Requirements
 
@@ -80,7 +80,7 @@ pm2 save
 sudo pm2 startup
 ```
 
-For Chromium kiosk mode on boot, create `~/.config/autostart/family-display.desktop`:
+For Chromium kiosk mode on boot, create `~/.config/autostart/test.desktop`:
 
 ```ini
 [Desktop Entry]
@@ -93,7 +93,7 @@ Exec=chromium --ozone-platform=wayland --kiosk --incognito --noerrdialogs --disa
 
 ## Meural digital frame support
 
-`meural-push.js` takes N portrait screenshots of `/portrait.html` via Puppeteer and pushes them to a Netgear Meural gallery. On each run it clears the previous batch, uploads fresh ones, assigns the gallery to all configured devices, and sends an immediate local postcard push so frames update without waiting for cloud sync.
+`meural-push.js` takes N portrait screenshots of `/portrait.html` via Puppeteer and pushes them to Netgear Meural frames. On each run it sends a **local postcard push** directly to each frame's IP (`/remote/postcard`) — this is the live display path, no cloud involved. Cloud gallery work (upload, clearing yesterday's items, gallery assign, full frame resync) happens **only on the nightly 22:00 run** (or when passing a manual `resync` arg), because cloud item changes sync to the frames and kick them out of the postcard preview.
 
 ### Setup
 
@@ -132,10 +132,10 @@ sudo apt install chromium
 npm install puppeteer-core --save-dev
 ```
 
-### Hourly cron on Pi (PM2)
+### Every-15-min cron on Pi (PM2)
 
 ```bash
-pm2 start meural-push.js --name meural-push --cron '0 5-22 * * *' --no-autorestart -- 6
+pm2 start meural-push.js --name meural-push --cron '*/15 5-22 * * *' --no-autorestart -- 6
 pm2 save
 ```
 
