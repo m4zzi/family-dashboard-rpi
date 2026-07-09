@@ -15,7 +15,7 @@
 2. **eMMC ISP / chip-off (hardware):** secure boot stops at the kernel, not the ext4 rootfs — so bypass the SoC entirely: wire the eMMC CLK/CMD/DAT0/GND to a USB SD reader, mount the rootfs, edit `/etc/shadow`, write back. **Prerequisite we have NOT confirmed:** that those eMMC lines are exposed as probeable test points. If they're buried BGA, it's a full chip-off — a big difficulty jump.
 
 **Two paths, try in this order:**
-1. **Root the Meural's own Linux (non-destructive, BEST)** — it's a Rockchip RK3288 board running Ubuntu 14.04 with a framebuffer + local web server. Get a shell, disable the Meural app, run a tiny "show this JPEG on the framebuffer" loop fed by our existing `meural-push` screenshots. Keeps 100% of the hardware. ← **this doc**
+1. **Root the Meural's own Linux (non-destructive, BEST)** — it's a Rockchip RK3288 board running Ubuntu 16.04 with a framebuffer + local web server. Get a shell, disable the Meural app, run a tiny "show this JPEG on the framebuffer" loop fed by our existing `meural-push` screenshots. Keeps 100% of the hardware. ← **this doc**
 2. **Gut + Pi (destructive, LAST resort)** — the panel is a **24-pin non-standard LVDS**, so this needs a driver board matched to a nonstandard panel (hard, maybe impossible to source cleanly). Only if rooting is truly dead.
 
 Both paths run the **same software** (a framebuffer JPEG display fed by the dashboard renderer), so nothing is wasted whichever we land on.
@@ -23,28 +23,27 @@ Both paths run the **same software** (a framebuffer JPEG display fed by the dash
 ---
 
 ## Hardware — what's confirmed vs. inherited from the teardown report
-- **SoC:** Rockchip **RK3288** — **CONFIRMED 2026-06-18** by lifting the EMI shield on our unit (board rev `U121397 REV.0 GP 803219`); chip is marked `Rockchip RK3288`, flanked by 4 DDR3 chips, eMMC/`VP6014` nearby. Same SoC as the teardown, newer board rev. 3.3 V logic → Flipper-safe UART, no level shifter. MaskROM USB VID:PID = `2207:320b`; `rkdeveloptool` works. Console baud 115200.
-- **OS / app:** teardown reported **Ubuntu 14.04 ARM** + a **CakePHP + shell-script** Meural app; likely similar on ours but confirm once we're in. Small eMMC/flash either way.
-- **Two identical frames:** the rootfs image is the same across both (same model/firmware), so the twin is a **reference/restore source for system partitions** — but each unit's MAC/serial/cloud-keys/calibration live in a per-device NVRAM/idblock, so don't clone a whole image unit-to-unit. Since we root **in-place (no reflash)**, a pre-dump is optional insurance, not required.
-- **Two access doors, both confirmed working by a teardown:**
-  - **MaskROM mode** (USB): hold the **reset button** while plugging USB into a host → RK3288 enumerates in MaskROM. `rkdeveloptool` reads/writes the whole flash. → **Phase 0 backup.**
-  - **UART console**: three labeled test pads **`G R T`** = **G**ND / **R**X / **T**X. → **Phase 1 live shell.**
+- **SoC:** Rockchip **RK3288** — **CONFIRMED 2026-06-18** by lifting the EMI shield on our unit (board rev `U121397 REV.0 GP 803219`); chip is marked `Rockchip RK3288`, flanked by 4 DDR3 chips, eMMC/`VP6014` nearby. Same SoC as the teardown, newer board rev. 3.3 V logic → Flipper-safe UART, no level shifter. MaskROM USB VID:PID = `2207:320b`; `rkdeveloptool ld` can see it, but loader/read commands are blocked. Console baud 115200.
+- **OS / app:** our boot log shows **Ubuntu 16.04**. Earlier teardown notes reported Ubuntu 14.04 + a CakePHP/shell-script Meural app, so treat the app-stack detail as likely but not proven until we get filesystem access.
+- **Two identical frames:** the rootfs image is likely the same across both (same model/firmware), so the twin is a useful reference for behavior — but each unit's MAC/serial/cloud-keys/calibration live in per-device storage, so don't clone a whole image unit-to-unit. Because USB readout is blocked, any future backup has to come from eMMC ISP/chip-off or a shell.
+- **Two access doors, but neither yielded root on our units:**
+  - **MaskROM mode** (USB): hold the **reset button** while plugging USB into a host → RK3288 enumerates in MaskROM (`2207:320b`), but signed-loader lock blocks loader upload and flash reads. Result: identification only, no backup/root.
+  - **UART console**: TX/GND works at 115200 and shows the full boot log, but it lands at an Ubuntu 16.04 `login:` with unknown credentials; U-Boot cannot be interrupted because `bootdelay=0` and key input is ignored.
 - **Panel:** 24-pin **non-standard LVDS** (why gut+Pi is the bad option).
 - **Known brick trap:** flash fills with runaway syslog (a teardown unit had 3 GB of logs → boot loop / "Download failed!"). **Our display loop must write only to tmpfs/RAM, never spam the flash.**
 
 ---
 
-# Phase 0 — full-flash backup over MaskROM (do this FIRST, before any poking)
+# USB / MaskROM attempt — why it did not get us root
 
-This is the insurance policy: a byte-for-byte image we can always restore, *and* a copy of the filesystem to study offline. Pure read — nothing is written to the device.
+The original plan was to use Rockchip MaskROM as a read-only insurance path: identify the chip, dump the flash, mount the rootfs offline, and edit `/etc/shadow` or startup scripts. That assumption did **not** hold on these frames.
 
-1. **Get `rkdeveloptool` on a Linux host** (easiest on the Pi `coffee-display` or any Linux box; macOS builds are fiddly via libusb). Build: `git clone https://github.com/rockchip-linux/rkdeveloptool && cd rkdeveloptool && autoreconf -i && ./configure && make`.
-2. **Enter MaskROM:** Meural powered off → **hold its reset button** → plug a USB cable from the Meural into the Linux host → release after a few seconds.
-3. Confirm it's seen: `sudo ./rkdeveloptool ld` (should list a MaskROM device) — or `lsusb` shows a Rockchip `2207:` VID.
-4. **Dump the flash** (read-only): `sudo ./rkdeveloptool rfi` to see the flash size, then read it out to a file (e.g. `rl <start> <count> backup.img`, or use the read-flash command for the full size). **Keep `backup.img` safe — this is the un-brick.**
-5. Optionally loop-mount the rootfs partition from the image to read `/etc/rc.local`, the CakePHP app, init scripts, and how the panel/framebuffer is driven — so we walk into Phase 1 already knowing the layout.
+1. **Enter MaskROM:** Meural powered off → hold reset while plugging USB into a host. The RK3288 enumerates as Rockchip `2207:320b`.
+2. **What works:** `rkdeveloptool ld` / USB enumeration can identify the SoC.
+3. **What fails:** loader-dependent operations such as flash info/read/dump fail. In practice this means no `rfi`, no `rl`, no full-flash `backup.img`, and no offline rootfs edit path over USB.
+4. **Best explanation:** the device uses a signed-loader / secure-boot path. MaskROM will enumerate, but it will not accept the generic loader needed for eMMC access. This blocks reads as well as writes, so USB is not merely write-protected; it is not a usable root path.
 
-> We do **not** write/flash in Phase 0. Writing back a modified image is the *recovery* tool (restore `backup.img`), not the primary edit path — live-editing over a shell (Phase 1) is safer and reversible.
+Consequence: the remaining hardware route is **eMMC ISP/chip-off**, bypassing the SoC entirely. That is only worth revisiting if the local `/remote` API path stops being enough.
 
 ---
 
@@ -58,7 +57,7 @@ This is the insurance policy: a byte-for-byte image we can always restore, *and*
 - Plastic **spudger / guitar pick** to open the frame (clips + some adhesive — go slow around the edge)
 
 ## Step 0 — mindset / safety
-- **Non-destructive:** Phase 0 gave us a full backup; Phase 1 is just reading/typing on a serial console + live-editing one startup file. Reversible.
+- **Non-destructive:** Phase 1 is just reading/typing on a serial console. Because USB readout is blocked, there is no confirmed full-flash backup from these units.
 - **READ before you DRIVE.** Hook up **RX + GND only** first and just *listen*. RK3288 is 3.3 V (Flipper-safe), but still confirm before connecting Flipper TX.
 - Work on **one frame** (start with the 21" walnut **tissot-913** — least-missed, smaller to handle).
 
@@ -105,11 +104,11 @@ Connect Flipper **pin 13 (TX) → Meural R (RX)**. Then, in order of luck:
 The teardown's exact move: from the console, **enable the SSH daemon and add a sudo user**, then unplug UART and work over SSH.
 ```
 # capture state first (paste back to me):
-cat /etc/os-release; uname -a; df -h; mount        # confirm Ubuntu 14.04, check flash isn't full
+cat /etc/os-release; uname -a; df -h; mount        # confirm Ubuntu 16.04, check flash isn't full
 ls -la /dev/fb*                                     # framebuffer device = our display target
 cat /etc/rc.local                                   # how startup works (where we'll hook sshd + our loop)
 ps aux | grep -iE "cake|php|meural|gallery|display" # the app that drives the screen (to disable)
-which fbi fbida fim feh ffmpeg                       # what image tools exist (14.04 may need an install)
+which fbi fbida fim feh ffmpeg                       # what image tools exist (16.04 may need an install)
 # then enable ssh + a user (adapt once we see the box):
 service ssh start || /etc/init.d/ssh start
 # add 'service ssh start' (+ user create if needed) to /etc/rc.local so it survives reboot
@@ -117,7 +116,7 @@ service ssh start || /etc/init.d/ssh start
 Send me that capture and I'll write the exact rc.local edits + the **framebuffer JPEG-display service** and repoint `meural-push` to push to *this device's* LAN IP instead of Meural's cloud.
 
 ## Recovery / don't-brick rules
-- We have **`backup.img` from Phase 0** — worst case, MaskROM-flash it back and the frame is exactly as it was.
+- We do **not** have a confirmed `backup.img` from these units; MaskROM readout was blocked. Treat any write attempt as high-risk unless eMMC ISP/chip-off produces a verified backup first.
 - In the live shell: only **add** a startup line + **disable** the Meural app. Don't `rm -rf` system dirs, don't `dd`/`mmc write`.
 - **Watch the flash:** the known brick is a full disk from logs. Our loop pulls JPEGs to **tmpfs (`/run` or a `mount -t tmpfs`)**, not the eMMC, and we should cap/disable Meural's chatty logging while we're in there.
 
