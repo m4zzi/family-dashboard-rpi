@@ -1,5 +1,9 @@
 const express = require('express');
 const path    = require('path');
+// Prefer IPv4: the Pi has a ULA-only IPv6 (no v6 internet), and Node's fetch tries
+// AAAA first and times out — weather/calendar/iCloud fetches all intermittently
+// failed this way (2026-07). See the matching note in meural-push.js.
+require('dns').setDefaultResultOrder('ipv4first');
 const config  = require('./config');
 
 const app = express();

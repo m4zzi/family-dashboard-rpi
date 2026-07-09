@@ -37,7 +37,7 @@ Defined in the **observability** repo, `observability/gatus/config.yaml` — thr
 
 **Why the postcard persists now:** a postcard is shown as a "preview," and the device setting `previewDuration` (default **60 s**) is how long before it reverts. We `PUT /devices/{id}` to set `previewDuration` / `imageDuration` / `overlayDuration` to **86400** (24h). `meural-push.js` re-pins these every run (idempotent). **Caveat: a changed `previewDuration` only takes effect at the frame's NEXT boot** — a sync isn't enough, and the API readback always shows the *saved* value, so it can't be verified from the script. After first setting it, **power-cycle each frame once**. Status: whistler-341 done (holds 24h); **tissot-913 still pending as of 2026-07-03** (reverts after ~60 s — but now reverts to the Dashboard gallery, so it still shows a dashboard image).
 
-## Four failure modes — diagnose which one
+## Five failure modes — diagnose which one
 
 ### 1. Frame stuck on a WEEKS-old image; reboot + power-cycle don't fix it; cloud looks current
 The frame's **local cache is wedged** — hoarding stale items and cycling its own junk. (Mostly moot now that the postcard overlays everything, but can surface if the postcard ever fails.)
@@ -69,6 +69,11 @@ ssh coffee-display "curl -s -o /dev/null -w '%{http_code}\n' http://localhost:30
 
 ### 4. Random old photos / stock art keep popping up between pushes (cloud is UP)
 **Cloud item churn is interrupting the postcard preview.** Any cloud gallery add/delete/sync pushes an event to the frames that drops them out of the preview and back to their current gallery until the next push — if that gallery is "Recents" (tracks every account upload) the frame shows *your past uploads*, seemingly at random. Surfaced 2026-07-03, the day Meural's `/items` recovered: the outage had been masking it, because the per-run upload probe failed before any churn happened. **Fix (now built in):** all cloud work is gated to the nightly 22:00 run; */15 runs are postcard-only. If this recurs, check nothing else is writing to the Meural account during the day, and that the frames' current gallery is "Dashboard" (`GET /remote/get_gallery_status_json/` → `current_gallery_name`).
+
+### 5. Runs die at `Authenticating...` with `Fatal: fetch failed` — AND/OR the dashboard itself shows stale weather/calendar
+**Broken IPv6 on the Pi, not Meural.** The router advertises a ULA-only IPv6 prefix (`fd4a:…`, no v6 route to the internet), so getaddrinfo reports IPv6 as usable; AWS/Google endpoints publish AAAA records; **Node's `fetch` tries IPv6 first and ETIMEDOUTs** — while `curl` quietly falls back to IPv4, which makes the network look healthy under manual testing. Hits *everything* Node fetches: Cognito auth in `meural-push.js` **and** `server.js`'s weather/calendar/iCloud pulls (6,218 `fetch failed` errors accumulated before this was caught, 2026-07-09 — so even successfully-delivered postcards showed stale data).
+**Tell-tale:** `curl https://cognito-idp.eu-west-1.amazonaws.com/` from the Pi returns 400 (= reachable) but the script still fatals; `curl -6 https://www.google.com` fails; `ip -6 addr show scope global` shows only `fd…` addresses.
+**Fix (in place):** both `meural-push.js` and `server.js` set `require('dns').setDefaultResultOrder('ipv4first')` at the top. If it recurs anyway, the real cure is disabling IPv6 RA on the UniFi LAN (or giving it working v6).
 
 ## What the script does each run (`main()`)
 Every */15 run (postcard-only — no cloud gallery traffic, see mode #4):

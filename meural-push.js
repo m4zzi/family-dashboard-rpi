@@ -7,6 +7,10 @@
 
 const path = require('path');
 const fs   = require('fs');
+// The Pi has a ULA-only IPv6 (router RA, no v6 internet), so getaddrinfo offers
+// AAAA records that Node's fetch tries first and ETIMEDOUTs on — curl survives via
+// happy-eyeballs, Node doesn't. Prefer IPv4 (bit us 2026-07: Cognito auth fatals).
+require('dns').setDefaultResultOrder('ipv4first');
 const { meural: mc, gatus: gatusCfg } = require('./config');
 
 const COGNITO_URL     = `https://cognito-idp.${mc.cognitoRegion}.amazonaws.com/`;
