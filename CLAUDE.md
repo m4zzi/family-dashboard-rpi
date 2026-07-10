@@ -55,7 +55,7 @@ package.json
 - `GET /api/birthdays`       — birthday list from config.js, returns daysUntil for each
 
 ## Meural portrait pipeline
-> **Operations runbook: [`MEURAL.md`](MEURAL.md)** — the two delivery paths, the three failure modes + how to tell them apart, and the postcard-resilience design. Read that first when a frame shows the wrong thing.
+> **Operations runbook: [`MEURAL.md`](MEURAL.md)** — the two delivery paths, the five failure modes + how to tell them apart, and the postcard-resilience design. Read that first when a frame shows the wrong thing.
 
 `meural-push.js` runs on the Pi every 15 min via PM2 cron (`*/15 5-22 * * *`, 5am–10pm). **The local postcard is the live display (primary); the cloud gallery is a nightly backup/fallback** — see [`MEURAL.md`](MEURAL.md) for the full model. Every run:
 1. Cognito auth → pin `previewDuration`/`imageDuration` to 24h so the postcard holds
