@@ -1,5 +1,16 @@
 # Family Dashboard for Raspberry Pi
 
+> **Deployment status review (2026-09-06):** `.2.164` and the frame addresses
+> below are the last documented Columbia targets. Newport Pi/frame operation has
+> not been established by the available records; verify the actual target before
+> deployment. [Newport architecture](../newport-infra/ARCHITECTURE.md) owns current
+> hosting decisions. This update does not change or deploy the application.
+>
+> **Secrets migration remains open:** the existing application reads `config.js`;
+> gitignore is not vault integration. Examples below describe that legacy mechanism.
+> Store new credentials in Infisical, never in a file or commit; a runtime-loading
+> migration requires separate implementation. See [the runbook](../infra/infisical.md).
+
 A full-screen family display built for a Raspberry Pi. Shows a rotating iCloud photo slideshow as the background with a live clock, weather, and upcoming calendar events layered on top — designed to replace DakBoard with something more personal and fully self-hosted.
 
 ![Stack: Node.js + Express + Vanilla JS](https://img.shields.io/badge/stack-Node.js%20%2B%20Vanilla%20JS-brightgreen)

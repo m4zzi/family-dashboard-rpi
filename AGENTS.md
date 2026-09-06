@@ -1,5 +1,16 @@
 # AGENTS.md — context for Codex & other coding agents
 
+> **Deployment status review (2026-09-06):** `.2.164` and the frame addresses
+> below are the last documented Columbia targets. Newport Pi/frame operation has
+> not been established by the available records; verify the actual target before
+> deployment. [Newport architecture](../newport-infra/ARCHITECTURE.md) owns current
+> hosting decisions. This update does not change or deploy the application.
+>
+> **Secrets migration remains open:** the existing application reads `config.js`;
+> gitignore is not vault integration. Examples below describe that legacy mechanism.
+> Store new credentials in Infisical, never in a file or commit; a runtime-loading
+> migration requires separate implementation. See [the runbook](../infra/infisical.md).
+
 > This is the agent entry point (Codex, Hermes, any non-Claude agent).
 > **Read `CLAUDE.md` in this repo first** — it is the source of truth (Pi details,
 > API routes, Meural pipeline, touch/scroll internals, known failure modes).
@@ -39,5 +50,5 @@ Solo Claude-coded repo (`m4zzi/family-dashboard-rpi`) — commit directly to `ma
   in the autostart (title-bar clipping / dead touch without them).
 - Scrolling uses the custom `attachDragScroll` pointer-events handler in `app.js` — native CSS
   overflow scroll is unreliable on the Wayland kiosk; don't "simplify" it away.
-- After changes: rsync → verify on the Pi → git commit → push. Don't leave the Pi and the repo
-  diverged.
+- For an authorized deployment: verify the current target, rsync → verify on the Pi →
+  commit/push under the repository policy. Documentation-only work does not deploy.

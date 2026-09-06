@@ -1,5 +1,16 @@
 # Family Dashboard — Claude Context
 
+> **Deployment status review (2026-09-06):** `.2.164` and the frame addresses
+> below are the last documented Columbia targets. Newport Pi/frame operation has
+> not been established by the available records; verify the actual target before
+> deployment. [Newport architecture](../newport-infra/ARCHITECTURE.md) owns current
+> hosting decisions. This update does not change or deploy the application.
+>
+> **Secrets migration remains open:** the existing application reads `config.js`;
+> gitignore is not vault integration. Examples below describe that legacy mechanism.
+> Store new credentials in Infisical, never in a file or commit; a runtime-loading
+> migration requires separate implementation. See [the runbook](../infra/infisical.md).
+
 ## What this is
 A full-screen family dashboard running in Chromium kiosk mode on a Raspberry Pi.
 Node.js/Express backend serves a vanilla JS frontend. No build step.
@@ -34,7 +45,7 @@ chromium --ozone-platform=wayland --kiosk --incognito --noerrdialogs
 ## File structure
 ```
 server.js          — Express API + in-memory cache
-config.js          — GITIGNORED — all secrets live here
+config.js          — legacy runtime configuration; credential migration remains open
 config.example.js  — committed template (no secrets)
 meural-push.js     — Puppeteer screenshot + Meural cloud upload script
 meural-diag.js     — Meural /items upload diagnostic
