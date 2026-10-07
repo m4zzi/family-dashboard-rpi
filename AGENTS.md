@@ -31,7 +31,7 @@ ssh m4zzi@192.168.2.164 "pm2 restart family-display"
   **gitignored — never commit it**. `config.example.js` is the committed template.
 
 ## Secrets
-Vault is Infisical at `http://secrets.home` (project `homelab`, env `prod`) — see
+Vault is Infisical on the Mac mini (loopback-only: SSH to the mini, then `http://localhost/api`), project `homelab`, env `prod` — see
 `infra/infisical.md`. Runtime creds for this service live in the Pi's gitignored `config.js`.
 Never hardcode or commit credentials; placeholders only in committed files.
 
