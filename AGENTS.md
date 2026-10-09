@@ -3,13 +3,13 @@
 > **Deployment status review (2026-09-06):** `.2.164` and the frame addresses
 > below are the last documented Columbia targets. Newport Pi/frame operation has
 > not been established by the available records; verify the actual target before
-> deployment. [Newport architecture](../newport-infra/ARCHITECTURE.md) owns current
+> deployment. [homelab architecture](../homelab/ARCHITECTURE.md) owns current
 > hosting decisions. This update does not change or deploy the application.
 >
 > **Secrets migration remains open:** the existing application reads `config.js`;
 > gitignore is not vault integration. Examples below describe that legacy mechanism.
 > Store new credentials in Infisical, never in a file or commit; a runtime-loading
-> migration requires separate implementation. See [the runbook](../infra/infisical.md).
+> migration requires separate implementation. See [the runbook](../homelab/docs/infisical.md).
 
 > This is the agent entry point (Codex, Hermes, any non-Claude agent).
 > **Read `CLAUDE.md` in this repo first** — it is the source of truth (Pi details,
@@ -32,7 +32,7 @@ ssh m4zzi@192.168.2.164 "pm2 restart family-display"
 
 ## Secrets
 Vault is Infisical on the Mac mini (loopback-only: SSH to the mini, then `http://localhost/api`), project `homelab`, env `prod` — see
-`infra/infisical.md`. Runtime creds for this service live in the Pi's gitignored `config.js`.
+`homelab/docs/infisical.md`. Runtime creds for this service live in the Pi's gitignored `config.js`.
 Never hardcode or commit credentials; placeholders only in committed files.
 
 ## Commit policy
