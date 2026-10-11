@@ -1,10 +1,8 @@
 # Family Dashboard — Claude Context
 
-> **Deployment status review (2026-09-06):** `.2.164` and the frame addresses
-> below are the last documented Columbia targets. Newport Pi/frame operation has
-> not been established by the available records; verify the actual target before
-> deployment. [homelab architecture](../homelab/ARCHITECTURE.md) owns current
-> hosting decisions. This update does not change or deploy the application.
+> **Status (2026-10-11):** running at the Monte Nido rental on `192.168.2.164`, Pacific
+> time. Meural push is paused (frames not unpacked yet; see [MEURAL.md](MEURAL.md)).
+> [homelab architecture](../homelab/ARCHITECTURE.md) owns current hosting decisions.
 >
 > **Secrets migration remains open:** the existing application reads `config.js`;
 > gitignore is not vault integration. Examples below describe that legacy mechanism.
@@ -109,7 +107,7 @@ All 6 feeds configured in `config.js` on the RPi:
 
 ## Weather
 - Provider: Open-Meteo (free, no API key)
-- Location: Columbia MO — lat 38.9517, lon -92.3341, tz America/Chicago
+- Location: Monte Nido CA — lat 34.0786, lon -118.6881, tz America/Los_Angeles
 - Units: Fahrenheit, mph
 - Server fetches: current + 8 daily + hourly (temp, weather_code, precip_probability)
 - `hourlyByDay` — object keyed by `"YYYY-MM-DD"`, each value is array of `{hour, temp, precip, icon, label}`

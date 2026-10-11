@@ -2,6 +2,13 @@
 
 How the family dashboard gets onto the two Meural Canvas II frames, and what to do when a frame shows the wrong thing. (Architecture/code lives in `meural-push.js`; this is the *operational* guide.)
 
+> **Paused 2026-10-11:** the frames are still packed from the move, so the pm2 job was removed
+> (`pm2 delete meural-push && pm2 save`). Running it without frames was not a no-op: it logged in
+> to the Meural cloud every 15 min, posted to the old Columbia frame IPs and, at 22:00, edited the
+> cloud gallery. Its heartbeat URLs still point at the Columbia Gatus (`192.168.2.34`). To resume
+> once the frames are on the network: update the frame IPs and heartbeat URLs in `config.js`, then
+> `pm2 start meural-push.js --name meural-push --cron '*/15 5-22 * * *' --no-autorestart && pm2 save`.
+
 > **State as of 2026-07-03:** Meural's cloud image-upload **recovered** (was broken 6/15–7/3, see mode #2). The display is still the **local postcard** — by design, not as a workaround. Cloud gallery work (upload + cleanup + resync) now runs **nightly only**: the day the cloud recovered, per-run uploads/deletes pushed sync events that kicked the frames out of the postcard preview and back to random gallery art every 15 min (mode #4). Rooting the frames to go fully cloud-free was attempted and **abandoned — every vector is locked** (see `MEURAL-REPURPOSE.md`).
 
 ## The setup
