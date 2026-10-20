@@ -156,7 +156,7 @@ pm2 save
 |-----|---------|-------------|
 | `icloudAlbumToken` | — | iCloud Shared Album token |
 | `calendars` | `[]` | Array of `{ url, name, color }` iCal feeds |
-| `birthdays` | `[]` | Array of `{ name, month, day }` birthdays |
+| `birthdays` | `[]` | Array of `{ name, month, day, year? }` birthdays. The family's canonical list; `year` (optional, birth year) is not shown on the display. Roadschool mirrors it in `app/public/app/themes/catalog.js` |
 | `weather.latitude` | — | Your city's latitude |
 | `weather.longitude` | — | Your city's longitude |
 | `weather.city` | — | Display name shown in weather modal |

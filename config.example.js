@@ -38,7 +38,7 @@ module.exports = {
   },
 
   // ── Birthdays ──────────────────────────────────────────────
-  // { name: 'Display Name', month: 1-12, day: 1-31 }
+  // { name: 'Display Name', month: 1-12, day: 1-31, year: 2016 }  (year optional, not displayed)
   birthdays: [
     // { name: 'Mom', month: 2, day: 25 },
   ],
