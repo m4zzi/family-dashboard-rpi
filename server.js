@@ -119,12 +119,12 @@ function photosFromRecords(records) {
     .map(r => [r.recordName, r]));
   const photos = [];
   for (const asset of records) {
-    if (asset.recordType !== 'CPLAsset') continue;
+    if (asset.recordType !== 'CPLAsset' || !asset.recordName) continue;
     const master = masters.get(asset.fields?.masterRef?.value?.recordName);
     if (!master?.fields || Number(master.fields.dataClassType?.value) === 2) continue;
     const photo = selectJpegRendition(asset.fields, assetJpegSlots)
       ?? selectJpegRendition(master.fields, masterJpegSlots);
-    if (photo) photos.push(photo);
+    if (photo) photos.push({ id: asset.recordName, ...photo });
   }
   return photos;
 }
@@ -198,23 +198,83 @@ async function fetchSharedAlbumPhotos(albumUrl) {
   return photos;
 }
 
-app.get('/api/photos', async (req, res) => {
-  try {
-    let photos = getCached('photos');
-    if (!photos) {
-      photos = config.icloudAlbumUrl
-        ? await fetchSharedAlbumPhotos(config.icloudAlbumUrl)
-        : await fetchICloudPhotos(config.icloudAlbumToken);
-      setCache('photos', photos);
+function registerSharedAlbumRoutes(app, fetchPhotos, now = Date.now) {
+  const minute = 60_000;
+  let album;
+  let inFlight;
+
+  async function refresh() {
+    const photos = await fetchPhotos();
+    const fetchedAt = now();
+    const links = new Map();
+    let refreshAt = fetchedAt + 60 * minute;
+    for (const { id, url } of photos) {
+      const expiry = new URL(url).searchParams.get('e');
+      let expiresAt = Infinity;
+      let linkRefreshAt = fetchedAt + 10 * minute;
+      if (expiry && Number.isFinite(Number(expiry))) {
+        expiresAt = Number(expiry) * 1000;
+        linkRefreshAt = expiresAt - 2 * minute;
+        refreshAt = Math.min(refreshAt, linkRefreshAt);
+      }
+      links.set(id, { url, expiresAt, refreshAt: linkRefreshAt });
     }
-    res.json(config.icloudAlbumUrl
-      ? filterPhotosByOrientation(photos, req.query.orientation).map(photo => photo.url)
-      : photos);
-  } catch (err) {
-    console.error('Photo error:', err.message);
-    res.status(500).json({ error: err.message });
+    album = { photos, links, refreshAt: Math.max(refreshAt, fetchedAt + minute) };
+    return album;
   }
-});
+
+  function getAlbum(id) {
+    const time = now();
+    if (album && album.refreshAt > time) {
+      if (id === undefined || album.links.get(id)?.refreshAt > time) return album;
+    }
+    if (!inFlight) inFlight = refresh().finally(() => { inFlight = undefined; });
+    return inFlight;
+  }
+
+  app.get('/api/photos', async (req, res) => {
+    try {
+      const { photos } = await getAlbum();
+      const matching = filterPhotosByOrientation(photos, req.query.orientation);
+      // Both displays interpolate these paths into single-quoted CSS url() values.
+      res.json(matching.map(({ id }) => '/api/photos/img/' + encodeURIComponent(id).replaceAll("'", '%27')));
+    } catch {
+      res.set('Cache-Control', 'no-store').status(502).json({ error: 'Unable to load photo album' });
+    }
+  });
+
+  app.get('/api/photos/img/:id', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      const { id } = req.params;
+      const { links } = await getAlbum(id);
+      const link = links.get(id);
+      if (!link) return res.status(404).send('Photo not found');
+      if (link.expiresAt <= now()) return res.status(502).send('Photo link expired');
+      res.redirect(302, link.url);
+    } catch {
+      res.status(502).send('Unable to load photo album');
+    }
+  });
+}
+
+if (config?.icloudAlbumUrl) {
+  registerSharedAlbumRoutes(app, () => fetchSharedAlbumPhotos(config.icloudAlbumUrl));
+} else {
+  app.get('/api/photos', async (req, res) => {
+    try {
+      let photos = getCached('photos');
+      if (!photos) {
+        photos = await fetchICloudPhotos(config.icloudAlbumToken);
+        setCache('photos', photos);
+      }
+      res.json(photos);
+    } catch (err) {
+      console.error('Photo error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+}
 
 // ── Weather (Open-Meteo — no API key required) ────────────────────────────────
 const WMO_CODES = {
@@ -418,4 +478,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseAlbumGuid, photosFromRecords, filterPhotosByOrientation, fetchSharedAlbumPhotos };
+module.exports = { parseAlbumGuid, photosFromRecords, filterPhotosByOrientation, fetchSharedAlbumPhotos, registerSharedAlbumRoutes };

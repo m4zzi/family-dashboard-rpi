@@ -69,6 +69,8 @@ module.exports = {
 
 For public album links configured with `icloudAlbumUrl`, the server uses the asset's JPEG renditions if available. Otherwise it uses the master's JPEG renditions, including the original if its file type is `public.jpeg`. In either case it picks the smallest long side of at least 1920 px, or the largest available if all are smaller.
 
+Apple’s signed image URLs expire after about 15 minutes. For these albums, `/api/photos` returns stable links under `/api/photos/img/`. Opening one redirects to the current signed URL, so the kiosk can keep using the same photo list and the Meural can load each snapshot with a valid link.
+
 The kiosk requests `/api/photos?orientation=landscape` and the Meural requests `/api/photos?orientation=portrait`. Square photos fit both. Each page gets the full album when no photo matches. Plain `/api/photos` and legacy token albums always return the full list of photo URLs.
 
 **Google Calendar iCal URL** — Calendar Settings → Integrate calendar → *Secret address in iCal format*

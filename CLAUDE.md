@@ -59,7 +59,8 @@ package.json
 ```
 
 ## API routes
-- `GET /api/photos`          — iCloud shared album photos, cache 1hr
+- `GET /api/photos`          — shuffled list of iCloud shared album photo links
+- `GET /api/photos/img/:id`  — redirects to the current signed image URL for an `icloudAlbumUrl` photo
 - `GET /api/weather`         — Open-Meteo (no API key), cache 15min; includes `hourlyByDay` map
 - `GET /api/calendar?days=N` — iCal feeds via ical-expander, cache 5min; default N=14
 - `GET /api/birthdays`       — birthday list from config.js, returns daysUntil for each
@@ -90,7 +91,9 @@ The **22:00 run only** (or a manual `resync` arg) additionally touches the cloud
 ## iCloud photo API flow
 Set `icloudAlbumUrl` in `config.js` for a public link of the form `https://photos.icloud.com/shared/album/<shortGUID>` or a bare shortGUID. The server resolves it through CloudKit, then uses the returned zone and anonymous token to count and page through asset/master pairs on the returned partition. Movies are skipped. The server uses the asset's JPEG renditions if available. Otherwise it uses the master's JPEG renditions, including `Original` only when its file type is `public.jpeg`. From the selected record it picks the smallest JPEG with a long side of at least 1920 px, or the largest if all are smaller.
 
-`/api/photos` returns a shuffled JSON array of URL strings. The server caches the full album for one hour by default. The kiosk requests `?orientation=landscape` and the Meural requests `?orientation=portrait`. Squares match both. Omitting the filter or finding no match returns the full album.
+`/api/photos` returns a shuffled JSON array of stable server routes of the form `/api/photos/img/<encoded asset recordName>`. Apple’s signed download URLs expire after about 15 minutes. Each route sends a 302 redirect with `Cache-Control: no-store` so the kiosk can reuse its list throughout the day. The server refreshes the album on demand two minutes before the earliest signed URL expires, with a cache lifetime between one minute and one hour. An image request can refresh sooner if its own URL is within two minutes of expiry. A link without an expiry is valid for ten minutes from fetch.
+
+The kiosk requests `?orientation=landscape` and the Meural requests `?orientation=portrait`. Squares match both. Omitting the filter or finding no match returns the full album.
 
 For legacy links such as `https://www.icloud.com/sharedalbum/#TOKEN`, leave `icloudAlbumUrl` empty or omit it and set `icloudAlbumToken` to the fragment after `#`. The legacy path returns the full shuffled URL list for either orientation.
 
