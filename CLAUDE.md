@@ -1,7 +1,8 @@
 # Family Dashboard — Claude Context
 
 > **Status (2026-10-11):** running at the Monte Nido rental on `192.168.2.164`, Pacific
-> time. Meural push is paused (frames not unpacked yet; see [MEURAL.md](MEURAL.md)).
+> time. Meural push resumed 2026-11-21 for tissot-913 only; whistler-341 is still packed
+> (see [MEURAL.md](MEURAL.md)).
 > [homelab architecture](../homelab/ARCHITECTURE.md) owns current hosting decisions.
 >
 > **Secrets migration remains open:** the existing application reads `config.js`;
