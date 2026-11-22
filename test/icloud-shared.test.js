@@ -64,6 +64,20 @@ test('pairs unordered records and chooses by long side, including exactly 1920',
   ]);
 });
 
+test('selects the master JPEGMed when the asset has only a master reference', () => {
+  const records = [
+    asset('portrait'),
+    master('portrait', {
+      ...rendition('JPEGThumb', 'thumb', 339, 508, 'public.jpeg'),
+      ...rendition('JPEGMed', 'medium', 1448, 2172, 'public.jpeg'),
+      ...rendition('Original', 'original', 4640, 6960, 'public.jpeg'),
+    }),
+  ];
+  assert.deepEqual(photosFromRecords(records), [
+    { url: 'https://cdn.invalid/medium/public.jpeg?name=public.jpeg', width: 1448, height: 2172 },
+  ]);
+});
+
 test('uses JPEG originals as a fallback and excludes other originals and movie previews', () => {
   const records = [
     master('heic', rendition('Original', 'heic', 4000, 3000, 'public.heic')), asset('heic'),

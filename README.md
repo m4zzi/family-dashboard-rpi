@@ -67,6 +67,8 @@ module.exports = {
 
 **iCloud photos** — Set `icloudAlbumUrl` to the public album link shown above or its bare shortGUID. For an older link such as `https://www.icloud.com/sharedalbum/#YOUR_TOKEN`, leave `icloudAlbumUrl` empty and set `icloudAlbumToken` to the part after `#`.
 
+For public album links configured with `icloudAlbumUrl`, the server uses the asset's JPEG renditions if available. Otherwise it uses the master's JPEG renditions, including the original if its file type is `public.jpeg`. In either case it picks the smallest long side of at least 1920 px, or the largest available if all are smaller.
+
 The kiosk requests `/api/photos?orientation=landscape` and the Meural requests `/api/photos?orientation=portrait`. Square photos fit both. Each page gets the full album when no photo matches. Plain `/api/photos` and legacy token albums always return the full list of photo URLs.
 
 **Google Calendar iCal URL** — Calendar Settings → Integrate calendar → *Secret address in iCal format*

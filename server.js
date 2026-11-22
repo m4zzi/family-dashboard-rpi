@@ -102,6 +102,17 @@ function jpegRendition(fields, slot) {
   return { url: url.replaceAll('${f}', 'public.jpeg'), width, height };
 }
 
+const assetJpegSlots = ['JPEGThumb', 'JPEGMed', 'JPEGLarge', 'JPEGFull'];
+const masterJpegSlots = [...assetJpegSlots, 'Original'];
+
+function selectJpegRendition(fields, slots) {
+  const renditions = slots
+    .map(slot => jpegRendition(fields, slot))
+    .filter(Boolean)
+    .sort((a, b) => Math.max(a.width, a.height) - Math.max(b.width, b.height));
+  return renditions.find(r => Math.max(r.width, r.height) >= 1920) ?? renditions.at(-1);
+}
+
 function photosFromRecords(records) {
   const masters = new Map(records
     .filter(r => r.recordType === 'CPLMaster' && r.recordName)
@@ -111,12 +122,8 @@ function photosFromRecords(records) {
     if (asset.recordType !== 'CPLAsset') continue;
     const master = masters.get(asset.fields?.masterRef?.value?.recordName);
     if (!master?.fields || Number(master.fields.dataClassType?.value) === 2) continue;
-    const renditions = ['JPEGThumb', 'JPEGMed', 'JPEGLarge', 'JPEGFull']
-      .map(slot => jpegRendition(asset.fields, slot))
-      .filter(Boolean)
-      .sort((a, b) => Math.max(a.width, a.height) - Math.max(b.width, b.height));
-    const photo = renditions.find(r => Math.max(r.width, r.height) >= 1920)
-      ?? renditions.at(-1) ?? jpegRendition(master.fields, 'Original');
+    const photo = selectJpegRendition(asset.fields, assetJpegSlots)
+      ?? selectJpegRendition(master.fields, masterJpegSlots);
     if (photo) photos.push(photo);
   }
   return photos;
