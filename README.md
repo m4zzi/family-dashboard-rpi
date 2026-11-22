@@ -48,7 +48,7 @@ Edit `config.js` with your details:
 
 ```js
 module.exports = {
-  icloudAlbumToken: 'YOUR_TOKEN',  // fragment after # in shared album URL
+  icloudAlbumUrl: 'https://photos.icloud.com/shared/album/YOUR_SHORT_GUID',
 
   calendars: [
     { url: 'https://...', name: 'Family', color: '#34A853' },
@@ -65,7 +65,9 @@ module.exports = {
 };
 ```
 
-**iCloud album token** — from `https://www.icloud.com/sharedalbum/#THIS_PART`
+**iCloud photos** — Set `icloudAlbumUrl` to the public album link shown above or its bare shortGUID. For an older link such as `https://www.icloud.com/sharedalbum/#YOUR_TOKEN`, leave `icloudAlbumUrl` empty and set `icloudAlbumToken` to the part after `#`.
+
+The kiosk requests `/api/photos?orientation=landscape` and the Meural requests `/api/photos?orientation=portrait`. Square photos fit both. Each page gets the full album when no photo matches. Plain `/api/photos` and legacy token albums always return the full list of photo URLs.
 
 **Google Calendar iCal URL** — Calendar Settings → Integrate calendar → *Secret address in iCal format*
 
@@ -154,7 +156,8 @@ pm2 save
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `icloudAlbumToken` | — | iCloud Shared Album token |
+| `icloudAlbumUrl` | `''` | Public photos.icloud.com shared album URL or bare shortGUID |
+| `icloudAlbumToken` | — | Legacy sharedstreams token, used when `icloudAlbumUrl` is empty or omitted |
 | `calendars` | `[]` | Array of `{ url, name, color }` iCal feeds |
 | `birthdays` | `[]` | Array of `{ name, month, day, year? }` birthdays. The family's canonical list; `year` (optional, birth year) is not shown on the display. Roadschool mirrors it in `app/public/app/themes/catalog.js` |
 | `weather.latitude` | — | Your city's latitude |

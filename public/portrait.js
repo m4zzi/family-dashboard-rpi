@@ -45,7 +45,7 @@ let photos = [];
 
 async function loadPhotos() {
   try {
-    const res = await fetch('/api/photos');
+    const res = await fetch('/api/photos?orientation=portrait');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const urls = await res.json();
     if (Array.isArray(urls) && urls.length > 0) {

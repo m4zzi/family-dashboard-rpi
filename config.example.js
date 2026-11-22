@@ -6,7 +6,9 @@
 
 module.exports = {
   // ── iCloud Shared Album ──────────────────────────────────
-  // Token is the fragment after # in your shared album URL
+  // New albums: paste https://photos.icloud.com/shared/album/<shortGUID> or the shortGUID.
+  icloudAlbumUrl: '',
+  // Leave icloudAlbumUrl empty to use the legacy token after # in your shared album URL.
   // e.g. https://www.icloud.com/sharedalbum/#YOURTOKEN
   icloudAlbumToken: 'YOUR_ICLOUD_ALBUM_TOKEN',
 

@@ -88,13 +88,17 @@ The **22:00 run only** (or a manual `resync` arg) additionally touches the cloud
 - All `/remote/...` local device endpoints need no auth and work whenever the frame is powered + on-network (verified against the `ha-meural`/`pymeural` client)
 
 ## iCloud photo API flow
+Set `icloudAlbumUrl` in `config.js` for a public link of the form `https://photos.icloud.com/shared/album/<shortGUID>` or a bare shortGUID. The server resolves it through CloudKit, then uses the returned zone and anonymous token to count and page through asset/master pairs on the returned partition. Movies are skipped. The server picks the smallest asset JPEG with a long side of at least 1920 px, or the largest available below that threshold. It uses the master's JPEG original only when the asset has no usable JPEG.
+
+`/api/photos` returns a shuffled JSON array of URL strings. The server caches the full album for one hour by default. The kiosk requests `?orientation=landscape` and the Meural requests `?orientation=portrait`. Squares match both. Omitting the filter or finding no match returns the full album.
+
+For legacy links such as `https://www.icloud.com/sharedalbum/#TOKEN`, leave `icloudAlbumUrl` empty or omit it and set `icloudAlbumToken` to the fragment after `#`. The legacy path returns the full shuffled URL list for either orientation.
+
 1. POST `https://sharedstreams.icloud.com/{token}/sharedstreams/webstream` `{"streamCtag":null}`
 2. If HTTP 330 → redirect host is in `X-Apple-MMe-Host` response field
 3. Repeat POST to get `photos[]` with `derivatives` — pick derivative with largest `fileSize`
 4. POST `webasseturls` with `photoGuids[]` → `items[checksum]{url_location, url_path}`
 5. Final URL: `https://{url_location}{url_path}`
-- Album token lives in `config.js` (`icloudAlbumToken`)
-- Photos are shuffled on each cache miss
 
 ## Calendar setup
 All 6 feeds configured in `config.js` on the RPi:

@@ -1,10 +1,12 @@
 const express = require('express');
 const path    = require('path');
+const { randomUUID } = require('node:crypto');
 // Prefer IPv4: the Pi has a ULA-only IPv6 (no v6 internet), and Node's fetch tries
 // AAAA first and times out — weather/calendar/iCloud fetches all intermittently
 // failed this way (2026-07). See the matching note in meural-push.js.
 require('dns').setDefaultResultOrder('ipv4first');
-const config  = require('./config');
+// Only the running dashboard needs the local configuration.
+const config = require.main === module ? require('./config') : undefined;
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
@@ -81,13 +83,126 @@ async function fetchICloudPhotos(token) {
   return urls.sort(() => Math.random() - 0.5);
 }
 
+function parseAlbumGuid(value) {
+  const input = typeof value === 'string' ? value.trim() : '';
+  if (/^[A-Za-z0-9_-]+$/.test(input)) return input;
+  const match = /^https:\/\/photos\.icloud\.com\/shared\/album\/([A-Za-z0-9_-]+)\/?(?:[?#].*)?$/.exec(input);
+  if (!match) throw new Error('Invalid iCloud shared album URL or shortGUID');
+  return match[1];
+}
+
+function jpegRendition(fields, slot) {
+  const prefix = 'res' + slot;
+  const fileType = fields[prefix + 'FileType']?.value;
+  if ((slot === 'Original' || fileType != null) && fileType !== 'public.jpeg') return null;
+  const url = fields[prefix + 'Res']?.value?.downloadURL;
+  const width = Number(fields[prefix + 'Width']?.value);
+  const height = Number(fields[prefix + 'Height']?.value);
+  if (typeof url !== 'string' || !url || !(width > 0 && height > 0)) return null;
+  return { url: url.replaceAll('${f}', 'public.jpeg'), width, height };
+}
+
+function photosFromRecords(records) {
+  const masters = new Map(records
+    .filter(r => r.recordType === 'CPLMaster' && r.recordName)
+    .map(r => [r.recordName, r]));
+  const photos = [];
+  for (const asset of records) {
+    if (asset.recordType !== 'CPLAsset') continue;
+    const master = masters.get(asset.fields?.masterRef?.value?.recordName);
+    if (!master?.fields || Number(master.fields.dataClassType?.value) === 2) continue;
+    const renditions = ['JPEGThumb', 'JPEGMed', 'JPEGLarge', 'JPEGFull']
+      .map(slot => jpegRendition(asset.fields, slot))
+      .filter(Boolean)
+      .sort((a, b) => Math.max(a.width, a.height) - Math.max(b.width, b.height));
+    const photo = renditions.find(r => Math.max(r.width, r.height) >= 1920)
+      ?? renditions.at(-1) ?? jpegRendition(master.fields, 'Original');
+    if (photo) photos.push(photo);
+  }
+  return photos;
+}
+
+function filterPhotosByOrientation(photos, orientation) {
+  if (orientation !== 'landscape' && orientation !== 'portrait') return photos;
+  const matching = photos.filter(({ width, height }) =>
+    orientation === 'landscape' ? width >= height : height >= width);
+  return matching.length ? matching : photos;
+}
+
+async function fetchSharedAlbumPhotos(albumUrl) {
+  const guid = parseAlbumGuid(albumUrl);
+  const database = '/database/1/com.apple.photos.cloud/production';
+  const params = new URLSearchParams({
+    remapEnums: 'true', getCurrentSyncToken: 'true', sharing_url_key: guid,
+    clientBuildNumber: '2642Build18', clientMasteringNumber: '2642Build18',
+  });
+
+  async function post(url, contentType, body) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { Origin: 'https://photos.icloud.com', 'Content-Type': contentType },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`iCloud shared album error: HTTP ${response.status}`);
+    return response.json();
+  }
+
+  const resolveUrl = `https://ckdatabasews.icloud.com${database}/public/records/resolve?${params}`;
+  const resolved = await post(resolveUrl, 'text/plain', { shortGUIDs: [{ value: guid }] });
+  const { zoneID, anonymousPublicAccess } = resolved.results?.[0] ?? {};
+  if (!zoneID || !anonymousPublicAccess?.token || !anonymousPublicAccess.databasePartition) {
+    throw new Error('iCloud did not grant public access to the shared album');
+  }
+  params.set('publicAccessAuthToken', anonymousPublicAccess.token);
+  params.set('clientId', randomUUID());
+  const partition = anonymousPublicAccess.databasePartition.replace(/\/$/, '');
+  const queryUrl = `${partition}${database}/shared/records/query?${params}`;
+  async function query(body) {
+    const result = await post(queryUrl, 'text/plain;charset=UTF-8', { zoneID, ...body });
+    if (!Array.isArray(result.records)) throw new Error('Missing iCloud query records');
+    return result.records;
+  }
+
+  const counts = await query({ query: {
+    recordType: 'HyperionIndexCountLookup',
+    filterBy: [{ fieldName: 'indexCountID', comparator: 'IN',
+      fieldValue: { type: 'STRING_LIST', value: ['CPLAssetByAddedDate'] } }],
+  } });
+  const fields = counts.find(r => r.recordType === 'IndexCountResult')?.fields;
+  const count = fields?.count?.value ?? fields?.itemCount?.value;
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid iCloud album count');
+
+  const records = [];
+  for (let rank = 0; rank < count; rank += 30) {
+    const page = await query({
+      resultsLimit: 2 * Math.min(30, count - rank),
+      query: { recordType: 'CPLAssetAndMasterByAddedDate', filterBy: [
+        { fieldName: 'direction', comparator: 'EQUALS', fieldValue: { type: 'STRING', value: 'ASCENDING' } },
+        { fieldName: 'startRank', comparator: 'EQUALS', fieldValue: { type: 'INT64', value: rank } },
+      ] },
+    });
+    records.push(...page);
+  }
+  const photos = photosFromRecords(records);
+  for (let i = photos.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [photos[i], photos[j]] = [photos[j], photos[i]];
+  }
+  return photos;
+}
+
 app.get('/api/photos', async (req, res) => {
-  const cached = getCached('photos');
-  if (cached) return res.json(cached);
   try {
-    const urls = await fetchICloudPhotos(config.icloudAlbumToken);
-    setCache('photos', urls);
-    res.json(urls);
+    let photos = getCached('photos');
+    if (!photos) {
+      photos = config.icloudAlbumUrl
+        ? await fetchSharedAlbumPhotos(config.icloudAlbumUrl)
+        : await fetchICloudPhotos(config.icloudAlbumToken);
+      setCache('photos', photos);
+    }
+    res.json(config.icloudAlbumUrl
+      ? filterPhotosByOrientation(photos, req.query.orientation).map(photo => photo.url)
+      : photos);
   } catch (err) {
     console.error('Photo error:', err.message);
     res.status(500).json({ error: err.message });
@@ -287,9 +402,13 @@ app.get('/api/cameras', (req, res) => {
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
-app.listen(config.port, () => {
-  console.log(`\n🖼️  Family display running → http://localhost:${config.port}\n`);
-  if (config.calendars.length === 0) {
-    console.log('ℹ️  No calendars configured. Edit config.js to add your iCal feeds.\n');
-  }
-});
+if (require.main === module) {
+  app.listen(config.port, () => {
+    console.log(`\n🖼️  Family display running → http://localhost:${config.port}\n`);
+    if (config.calendars.length === 0) {
+      console.log('ℹ️  No calendars configured. Edit config.js to add your iCal feeds.\n');
+    }
+  });
+}
+
+module.exports = { parseAlbumGuid, photosFromRecords, filterPhotosByOrientation, fetchSharedAlbumPhotos };
