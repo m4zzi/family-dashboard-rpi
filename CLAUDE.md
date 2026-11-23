@@ -62,7 +62,7 @@ package.json
 - `GET /api/photos`          — shuffled list of iCloud shared album photo links
 - `GET /api/photos/img/:id`  — redirects to the current signed image URL for an `icloudAlbumUrl` photo
 - `GET /api/weather`         — Open-Meteo (no API key), cache 15min; includes `hourlyByDay` map
-- `GET /api/calendar?days=N` — iCal feeds via ical-expander, cache 5min; default N=14
+- `GET /api/calendar?days=N&pastDays=P` — iCal events from local midnight P days ago (0–31, default 0) through `windowEnd` (N days ahead, 1–120, default 14). `failed` lists feed names. If all configured feeds fail, the response includes `error: true` and the next request retries. Successful and partially successful feed loads are cached for 5 minutes.
 - `GET /api/birthdays`       — birthday list from config.js, returns daysUntil for each
 
 ## Meural portrait pipeline
@@ -110,7 +110,7 @@ All 6 feeds configured in `config.js` on the RPi:
 - **Home** (orange `#FB923C`) — iCloud Reminders
 - **Holidays** (amber `#FBBC05`) — Google US holidays
 - `calendarDays: 14` — events strip shows 14 days ahead
-- Calendar month modal fetches `?days=90` on first open, cached in JS
+- Calendar month modal requests 90 days ahead plus the days since the first of this month, and refreshes on open after 5 minutes.
 - iCal feeds parsed with `ical-expander` (handles RRULE recurring events)
 
 ## Weather

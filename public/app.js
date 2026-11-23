@@ -6,7 +6,9 @@ const CLOCK_TICK       = 1_000;
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 let weatherData        = null;
-let calendarAllEvents  = [];
+let calendarByDay      = new Map();
+let calendarFetchedAt  = null;
+let calendarUnavailable = false;
 let calViewDate        = null;
 let calSelectedKey     = null;
 let expandedForecastDate = null;  // which day row has its hourly strip open
@@ -28,16 +30,36 @@ function fmtHour(h) {
   if (h === 12) return '12pm';
   return `${h - 12}pm`;
 }
-function dayKey(isoString) {
-  const d = new Date(isoString);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+function groupEventsByDay(events, firstDay, windowEnd, fallbackDays = 14) {
+  // Older calendar responses omit windowEnd until the server has restarted.
+  const today = new Date();
+  const until = windowEnd ? Date.parse(windowEnd) : today.setDate(today.getDate() + fallbackDays);
+  const byDay = new Map();
+  const first = new Date(firstDay);
+  first.setHours(0, 0, 0, 0);
+  for (const ev of events) {
+    const start = new Date(ev.start);
+    const end = ev.end ? new Date(ev.end) : start;
+    // End is exclusive at midnight. A zero-duration event still occupies its start day.
+    const last = Math.min(until, end > start ? end.getTime() - 1 : start.getTime());
+    const day = new Date(Math.max(first, start));
+    day.setHours(0, 0, 0, 0);
+    for (; day <= last; day.setDate(day.getDate() + 1)) {
+      const key = localDateKey(day);
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key).push(ev);
+    }
+  }
+  return byDay;
 }
 function localDateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
 function dayHeading(dateKey) {
-  const today    = localDateKey(new Date());
-  const tomorrow = localDateKey(new Date(Date.now() + 86_400_000));
+  const date = new Date();
+  const today = localDateKey(date);
+  date.setDate(date.getDate() + 1);
+  const tomorrow = localDateKey(date);
   if (dateKey === today)    return 'Today';
   if (dateKey === tomorrow) return 'Tomorrow';
   const d = new Date(dateKey + 'T12:00:00');
@@ -67,13 +89,23 @@ updateClock();
 const bg1 = document.getElementById('photoBg1');
 const bg2 = document.getElementById('photoBg2');
 const counter = document.getElementById('photoCounter');
-let photos = [], photoIndex = 0, activeBg = bg1, hiddenBg = bg2;
+let photos = [], photoIndex = -1, activeBg = bg1, hiddenBg = bg2;
+let photoInFlight = false;
 
 function preloadImage(url) {
   return new Promise(resolve => {
     const img = new Image();
-    img.onload  = () => resolve(url);
-    img.onerror = () => resolve(null);
+    const timeout = setTimeout(() => {
+      finish(null);
+      img.removeAttribute('src');
+    }, 20_000);
+    function finish(loaded) {
+      clearTimeout(timeout);
+      img.onload = img.onerror = null;
+      resolve(loaded);
+    }
+    img.onload  = () => finish(url);
+    img.onerror = () => finish(null);
     img.src = url;
   });
 }
@@ -87,48 +119,64 @@ function updateDots() {
     counter.appendChild(dot);
   }
 }
-async function showPhoto(index) {
-  if (photos.length === 0) return;
-  const loaded = await preloadImage(photos[index % photos.length]);
-  if (!loaded) { advancePhoto(); return; }
-  hiddenBg.style.backgroundImage = `url('${loaded}')`;
-  hiddenBg.style.opacity = '1';
-  activeBg.style.opacity = '0';
-  [activeBg, hiddenBg] = [hiddenBg, activeBg];
-  updateDots();
-}
-function advancePhoto() {
-  photoIndex = (photoIndex + 1) % (photos.length || 1);
-  showPhoto(photoIndex);
+async function advancePhoto() {
+  if (photoInFlight || !photos.length) return;
+  photoInFlight = true;
+  const list = photos;
+  try {
+    for (let attempt = 0; attempt < list.length && list === photos; attempt++) {
+      photoIndex = (photoIndex + 1) % list.length;
+      const loaded = await preloadImage(list[photoIndex]);
+      if (list !== photos) break;
+      if (loaded) {
+        hiddenBg.style.backgroundImage = `url('${loaded}')`;
+        hiddenBg.style.opacity = '1';
+        activeBg.style.opacity = '0';
+        [activeBg, hiddenBg] = [hiddenBg, activeBg];
+        updateDots();
+        return;
+      }
+      if (attempt + 1 < list.length) await new Promise(resolve => setTimeout(resolve, 3_000));
+    }
+  } finally {
+    photoInFlight = false;
+    if (list !== photos) advancePhoto();
+  }
 }
 async function loadPhotos() {
+  let refreshIn = 60_000;
   try {
     const res = await fetch('/api/photos?orientation=landscape');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const urls = await res.json();
     if (Array.isArray(urls) && urls.length > 0) {
-      photos = urls; photoIndex = 0; showPhoto(0);
+      photos = urls;
+      photoIndex = -1;
+      advancePhoto();
+      refreshIn = 60 * 60_000;
     }
   } catch (err) { console.warn('Photos unavailable:', err.message); }
+  setTimeout(loadPhotos, refreshIn);
 }
 loadPhotos();
 setInterval(advancePhoto, PHOTO_INTERVAL);
 
 // ── Weather ───────────────────────────────────────────────────────────────────
+let weatherExpiryTimer;
 async function loadWeather() {
   try {
     const res = await fetch('/api/weather');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    weatherData = await res.json();
+    const data = await res.json();
 
-    document.getElementById('weatherBlock').style.display = '';
-    document.getElementById('weatherIcon').textContent  = weatherData.icon ?? '🌡️';
-    document.getElementById('weatherTemp').textContent  = `${weatherData.temp}°`;
-    document.getElementById('weatherLabel').textContent = `${weatherData.label} · feels ${weatherData.feels}°`;
+    document.getElementById('weatherIcon').textContent  = data.icon ?? '🌡️';
+    document.getElementById('weatherTemp').textContent  = `${data.temp}°`;
+    document.getElementById('weatherLabel').textContent = `${data.label} · feels ${data.feels}°`;
 
     const forecastEl = document.getElementById('weatherForecast');
     const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    forecastEl.innerHTML = weatherData.daily.slice(1, 4).map(day => {
+    const todayKey = localDateKey(new Date());
+    forecastEl.innerHTML = data.daily.filter(day => day.date > todayKey).slice(0, 3).map(day => {
       const d = new Date(day.date + 'T12:00:00');
       return `<div class="forecast-day">
         <div class="forecast-day-name">${dayNames[d.getDay()]}</div>
@@ -137,6 +185,12 @@ async function loadWeather() {
         <div class="forecast-day-lo">${day.low}°</div>
       </div>`;
     }).join('');
+    weatherData = data;
+    document.getElementById('weatherBlock').style.display = '';
+    clearTimeout(weatherExpiryTimer);
+    weatherExpiryTimer = setTimeout(() => {
+      document.getElementById('weatherBlock').style.display = 'none';
+    }, 2 * 60 * 60_000);
   } catch (err) {
     console.warn('Weather unavailable:', err.message);
     if (!weatherData) document.getElementById('weatherBlock').style.display = 'none';
@@ -152,9 +206,6 @@ async function loadBirthdays() {
     const res = await fetch('/api/birthdays');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const birthdays = await res.json();
-    const upcoming = birthdays.filter(b => b.daysUntil <= 14);
-    if (upcoming.length === 0) { birthdayBanner.hidden = true; return; }
-
     // Build lookup for calendar modal
     birthdaysByDate = {};
     for (const b of birthdays) {
@@ -162,6 +213,9 @@ async function loadBirthdays() {
       if (!birthdaysByDate[key]) birthdaysByDate[key] = [];
       birthdaysByDate[key].push(b.name);
     }
+
+    const upcoming = birthdays.filter(b => b.daysUntil <= 14);
+    if (upcoming.length === 0) { birthdayBanner.hidden = true; return; }
 
     birthdayBanner.hidden = false;
     birthdayBanner.innerHTML = '';
@@ -193,7 +247,7 @@ async function loadCalendar() {
   try {
     const res = await fetch('/api/calendar');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { events, unconfigured } = await res.json();
+    const { events, unconfigured, error, windowEnd } = await res.json();
     container.innerHTML = '';
 
     if (unconfigured) {
@@ -202,23 +256,19 @@ async function loadCalendar() {
         <p>Open <code>config.js</code> and add your iCal feed URLs.</p></div>`;
       return;
     }
-    if (events.length === 0) {
+    const byDay = groupEventsByDay(events, new Date(), windowEnd);
+    if (byDay.size === 0) {
       container.innerHTML = `<div class="day-col">
         <div class="day-label today">Upcoming</div>
-        <div class="no-events">Nothing scheduled — enjoy your day!</div>
+        <div class="no-events">${error ? 'Calendar unavailable' : 'Nothing scheduled — enjoy your day!'}</div>
       </div>`;
       return;
     }
 
-    const byDay = new Map();
-    for (const ev of events) {
-      const key = dayKey(ev.start);
-      if (!byDay.has(key)) byDay.set(key, []);
-      byDay.get(key).push(ev);
-    }
     const todayKey = localDateKey(new Date());
 
-    for (const [dateKey, dayEvents] of byDay) {
+    for (const dateKey of [...byDay.keys()].sort()) {
+      const dayEvents = byDay.get(dateKey);
       const col = document.createElement('div');
       col.className = 'day-col';
 
@@ -251,7 +301,7 @@ async function loadCalendar() {
     console.warn('Calendar unavailable:', err.message);
     container.innerHTML = `<div class="day-col">
       <div class="day-label">Calendar</div>
-      <div class="no-events">Could not load events</div>
+      <div class="no-events">Calendar unavailable</div>
     </div>`;
   }
 }
@@ -360,10 +410,7 @@ function renderWeatherModal() {
 
 function openWeatherModal() {
   if (!weatherData) return;
-  // Auto-expand today's hourly on first open
-  if (!expandedForecastDate) {
-    expandedForecastDate = weatherData.daily[0]?.date ?? null;
-  }
+  expandedForecastDate = localDateKey(new Date());
   renderWeatherModal();
   weatherBackdrop.hidden = false;
 }
@@ -380,17 +427,24 @@ const calendarBackdrop = document.getElementById('calendarBackdrop');
 
 async function openCalendarModal() {
   calendarBackdrop.hidden = false;
-  calViewDate = new Date();
-  calViewDate.setDate(1);
+  const today = new Date();
+  const windowStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  calViewDate = new Date(windowStart);
 
-  if (calendarAllEvents.length === 0) {
+  if (calendarFetchedAt === null || Date.now() - calendarFetchedAt >= CALENDAR_REFRESH) {
     try {
-      const res = await fetch('/api/calendar?days=90');
-      if (res.ok) {
-        const data = await res.json();
-        calendarAllEvents = data.events || [];
-      }
-    } catch (err) { console.warn('Calendar modal fetch failed:', err.message); }
+      const res = await fetch(`/api/calendar?days=90&pastDays=${today.getDate() - 1}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { events, error, windowEnd } = await res.json();
+      calendarByDay = groupEventsByDay(events, windowStart, windowEnd, 90);
+      calendarUnavailable = Boolean(error && !events.length);
+      calendarFetchedAt = calendarUnavailable ? null : Date.now();
+    } catch (err) {
+      console.warn('Calendar modal fetch failed:', err.message);
+      calendarByDay.clear();
+      calendarUnavailable = true;
+      calendarFetchedAt = null;
+    }
   }
   renderCalendarMonth('none');
 }
@@ -409,13 +463,6 @@ function renderCalendarMonth(direction) {
   const firstDow    = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const todayKey    = localDateKey(new Date());
-
-  const eventMap = {};
-  for (const ev of calendarAllEvents) {
-    const key = dayKey(ev.start);
-    if (!eventMap[key]) eventMap[key] = [];
-    eventMap[key].push(ev);
-  }
 
   const grid = document.getElementById('calGrid');
   // Apply directional slide class
@@ -439,7 +486,7 @@ function renderCalendarMonth(direction) {
     const dateKey   = `${year}-${String(month+1).padStart(2,'0')}-${String(dayNum).padStart(2,'0')}`;
     const isToday   = dateKey === todayKey;
     const isSelected = dateKey === calSelectedKey;
-    const dayEvents  = eventMap[dateKey] || [];
+    const dayEvents  = calendarByDay.get(dateKey) || [];
 
     cell.className = 'cal-cell'
       + (isToday    ? ' is-today'  : '')
@@ -483,9 +530,10 @@ function renderCalendarMonth(direction) {
   }
 
   if (calSelectedKey) {
-    renderCalDayPanel(calSelectedKey, eventMap[calSelectedKey] || []);
+    renderCalDayPanel(calSelectedKey, calendarByDay.get(calSelectedKey) || []);
   } else {
-    document.getElementById('calDayPanel').innerHTML = '';
+    document.getElementById('calDayPanel').innerHTML = calendarUnavailable
+      ? '<div class="cal-empty-day">Calendar unavailable</div>' : '';
   }
 }
 
@@ -526,8 +574,8 @@ function renderCalDayPanel(dateKey, events) {
     }
   }
 
-  if (events.length === 0 && !bdays) {
-    panel.innerHTML += '<div class="cal-empty-day">Nothing scheduled</div>';
+  if (events.length === 0 && (calendarUnavailable || !bdays)) {
+    panel.innerHTML += `<div class="cal-empty-day">${calendarUnavailable ? 'Calendar unavailable' : 'Nothing scheduled'}</div>`;
     return;
   }
   for (const ev of events) {

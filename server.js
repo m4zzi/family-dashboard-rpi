@@ -198,6 +198,13 @@ async function fetchSharedAlbumPhotos(albumUrl) {
   return photos;
 }
 
+function logAlbumError(err) {
+  // JSON parser messages can quote the upstream body, including partial signed links.
+  const message = err instanceof SyntaxError ? 'Invalid JSON in album response'
+    : String(err?.message ?? 'Unknown album error').replace(/https?:\/\/[^\s]+/gi, '[URL]');
+  console.error('Photo album error:', message);
+}
+
 function registerSharedAlbumRoutes(app, fetchPhotos, now = Date.now) {
   const minute = 60_000;
   let album;
@@ -238,7 +245,8 @@ function registerSharedAlbumRoutes(app, fetchPhotos, now = Date.now) {
       const matching = filterPhotosByOrientation(photos, req.query.orientation);
       // Both displays interpolate these paths into single-quoted CSS url() values.
       res.json(matching.map(({ id }) => '/api/photos/img/' + encodeURIComponent(id).replaceAll("'", '%27')));
-    } catch {
+    } catch (err) {
+      logAlbumError(err);
       res.set('Cache-Control', 'no-store').status(502).json({ error: 'Unable to load photo album' });
     }
   });
@@ -252,7 +260,8 @@ function registerSharedAlbumRoutes(app, fetchPhotos, now = Date.now) {
       if (!link) return res.status(404).send('Photo not found');
       if (link.expiresAt <= now()) return res.status(502).send('Photo link expired');
       res.redirect(302, link.url);
-    } catch {
+    } catch (err) {
+      logAlbumError(err);
       res.status(502).send('Unable to load photo album');
     }
   });
@@ -369,69 +378,89 @@ app.get('/api/weather', async (req, res) => {
 });
 
 // ── Calendar (iCal feeds) ─────────────────────────────────────────────────────
-app.get('/api/calendar', async (req, res) => {
-  const days = Math.min(parseInt(req.query.days) || config.calendarDays, 120);
-  const cacheKey = `calendar_${days}`;
-  const cached = _cache[cacheKey];
-  if (cached && Date.now() - cached.ts < config.cache.calendar) return res.json(cached.data);
+function boundedInteger(value, fallback, min, max) {
+  const n = typeof value === 'string' && value.trim() ? Number(value) : fallback;
+  return Math.max(min, Math.min(max, Number.isInteger(n) ? n : fallback));
+}
 
-  if (config.calendars.length === 0) {
-    return res.json({ events: [], unconfigured: true });
-  }
+function createCalendarHandler(config, now = Date.now) {
+  const cache = new Map();
+  return async (req, res) => {
+    const days = boundedInteger(req.query.days, config.calendarDays ?? 14, 1, 120);
+    const pastDays = boundedInteger(req.query.pastDays, 0, 0, 31);
+    const cacheKey = `${days}_${pastDays}`;
+    const cached = cache.get(cacheKey);
+    if (cached && now() - cached.ts < config.cache.calendar) return res.json(cached.data);
 
-  try {
-    const IcalExpander = (await import('ical-expander')).default;
-    const now     = new Date();
-    const endDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-    const allEvents = [];
-
-    for (const cal of config.calendars) {
-      try {
-        const r = await fetch(cal.url);
-        if (!r.ok) { console.error(`Calendar ${cal.name}: HTTP ${r.status}`); continue; }
-        const icsText = await r.text();
-
-        const expander = new IcalExpander({ ics: icsText, maxIterationCount: 500 });
-        const results  = expander.between(now, endDate);
-
-        const toEvent = (e, start, end) => ({
-          title:    e.summary || '(No title)',
-          start:    start.toJSDate().toISOString(),
-          end:      end?.toJSDate()?.toISOString() ?? null,
-          allDay:   start.isDate,
-          calendar: cal.name,
-          color:    cal.color ?? '#60a5fa',
-        });
-
-        for (const e of results.events) {
-          allEvents.push(toEvent(e, e.startDate, e.endDate));
-        }
-        for (const o of results.occurrences) {
-          allEvents.push(toEvent(o.item, o.startDate, o.endDate));
-        }
-      } catch (calErr) {
-        console.error(`Calendar ${cal.name} error:`, calErr.message);
-      }
+    if (config.calendars.length === 0) {
+      return res.json({ events: [], failed: [], unconfigured: true });
     }
 
-    allEvents.sort((a, b) => {
-      // Primary: chronological order
-      const diff = new Date(a.start) - new Date(b.start);
-      if (diff !== 0) return diff;
-      // Tiebreak: all-day events before timed events on the same day
-      if (a.allDay && !b.allDay) return -1;
-      if (!a.allDay && b.allDay) return 1;
-      return 0;
-    });
+    try {
+      const IcalExpander = (await import('ical-expander')).default;
+      const today = new Date(now());
+      const startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - pastDays);
+      const endDate = new Date(today);
+      endDate.setDate(endDate.getDate() + days);
+      const failed = [];
+      const allEvents = [];
 
-    const data = { events: allEvents, unconfigured: false };
-    _cache[cacheKey] = { data, ts: Date.now() };
-    res.json(data);
-  } catch (err) {
-    console.error('Calendar error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+      for (const cal of config.calendars) {
+        try {
+          const r = await fetch(cal.url);
+          if (!r.ok) {
+            console.error(`Calendar ${cal.name}: HTTP ${r.status}`);
+            failed.push(cal.name);
+            continue;
+          }
+          const icsText = await r.text();
+
+          const expander = new IcalExpander({ ics: icsText, maxIterations: 5000 });
+          const results  = expander.between(startDate, endDate);
+
+          const toEvent = (e, start, end) => ({
+            title:    e.summary || '(No title)',
+            start:    start.toJSDate().toISOString(),
+            end:      end?.toJSDate()?.toISOString() ?? null,
+            allDay:   start.isDate,
+            calendar: cal.name,
+            color:    cal.color ?? '#60a5fa',
+          });
+
+          const feedEvents = results.events.map(e => toEvent(e, e.startDate, e.endDate));
+          for (const o of results.occurrences) {
+            feedEvents.push(toEvent(o.item, o.startDate, o.endDate));
+          }
+          for (const event of feedEvents) allEvents.push(event);
+        } catch {
+          // Upstream error messages may include a private feed URL.
+          console.error(`Calendar ${cal.name}: could not load feed`);
+          failed.push(cal.name);
+        }
+      }
+
+      allEvents.sort((a, b) => {
+        // Primary: chronological order
+        const diff = new Date(a.start) - new Date(b.start);
+        if (diff !== 0) return diff;
+        // Tiebreak: all-day events before timed events on the same day
+        if (a.allDay && !b.allDay) return -1;
+        if (!a.allDay && b.allDay) return 1;
+        return 0;
+      });
+
+      const data = { events: allEvents, failed, unconfigured: false, windowEnd: endDate.toISOString() };
+      if (failed.length === config.calendars.length) return res.json({ ...data, error: true });
+      cache.set(cacheKey, { data, ts: now() });
+      res.json(data);
+    } catch {
+      console.error('Calendar unavailable');
+      res.status(500).json({ events: [], failed: config.calendars.map(cal => cal.name), error: true });
+    }
+  };
+}
+
+app.get('/api/calendar', createCalendarHandler(config));
 
 // ── Birthdays ────────────────────────────────────────────────────────────────
 app.get('/api/birthdays', (req, res) => {
@@ -478,4 +507,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseAlbumGuid, photosFromRecords, filterPhotosByOrientation, fetchSharedAlbumPhotos, registerSharedAlbumRoutes };
+module.exports = { parseAlbumGuid, photosFromRecords, filterPhotosByOrientation, fetchSharedAlbumPhotos, registerSharedAlbumRoutes, createCalendarHandler };

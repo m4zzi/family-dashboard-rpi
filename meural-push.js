@@ -11,11 +11,8 @@ const fs   = require('fs');
 // AAAA records that Node's fetch tries first and ETIMEDOUTs on — curl survives via
 // happy-eyeballs, Node doesn't. Prefer IPv4 (bit us 2026-07: Cognito auth fatals).
 require('dns').setDefaultResultOrder('ipv4first');
-const { meural: mc, gatus: gatusCfg } = require('./config');
 
-const COGNITO_URL     = `https://cognito-idp.${mc.cognitoRegion}.amazonaws.com/`;
 const API_BASE        = 'https://api.meural.com/v0';
-const PORTRAIT_URL    = (mc.portraitUrl || 'http://localhost:3000') + '/portrait.html';
 const COUNT           = parseInt(process.argv[2]) || 1;
 // Meural shows a postcard as a "preview" governed by previewDuration (default 60s →
 // it reverts after a minute). Pin preview/image/overlay durations high so a postcard
@@ -40,8 +37,8 @@ const RESYNC          = process.argv.slice(2).includes('resync') ||
   (new Date().getHours() === NIGHTLY_RESYNC_HOUR && new Date().getMinutes() < 15); // once/night even at */15 cadence
 
 // ── Cognito auth ──────────────────────────────────────────────────────────────
-async function getToken() {
-  const res = await fetch(COGNITO_URL, {
+async function getToken(mc) {
+  const res = await fetch(`https://cognito-idp.${mc.cognitoRegion}.amazonaws.com/`, {
     method: 'POST',
     headers: {
       'content-type':  'application/x-amz-json-1.1',
@@ -54,9 +51,13 @@ async function getToken() {
     }),
     signal: AbortSignal.timeout(API_TIMEOUT),
   });
-  if (!res.ok) throw new Error(`Auth failed: ${res.status} ${await res.text()}`);
-  const { AuthenticationResult } = await res.json();
-  return AuthenticationResult.AccessToken;
+  if (!res.ok) throw new Error(`Cognito HTTP ${res.status}`);
+  const response = await res.json();
+  const token = response?.AuthenticationResult?.AccessToken;
+  if (!token) {
+    throw new Error('Cognito returned no access token (authentication challenge or incomplete reply)');
+  }
+  return token;
 }
 
 // ── Meural API helpers ────────────────────────────────────────────────────────
@@ -71,15 +72,14 @@ async function apiGet(token, p) {
 }
 
 async function apiPost(token, p, body) {
-  const isForm = body instanceof FormData;
   const res = await fetch(`${API_BASE}${p}`, {
     method: 'POST',
-    headers: headers(token, isForm ? {} : { 'content-type': 'application/json' }),
-    body: isForm ? body : JSON.stringify(body),
+    headers: headers(token, body ? { 'content-type': 'application/json' } : {}),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(API_TIMEOUT),
   });
-  if (!res.ok) throw new Error(`POST ${p}: ${res.status} ${await res.text()}`);
-  return res.json();
+  if (!res.ok) throw new Error(`POST ${p}: HTTP ${res.status}`);
+  return res;
 }
 
 async function apiDelete(token, p) {
@@ -91,8 +91,8 @@ async function apiDelete(token, p) {
 // ── Pin display durations so a postcard persists (the bridge while cloud is down) ──
 // Idempotent: re-applied each run. Takes effect on the frame at its NEXT boot — but
 // keeping the saved value at 86400 means any reboot (power blip, update) applies it.
-async function setHoldDurations(token) {
-  for (const d of mc.devices) {
+async function setHoldDurations(token, devices) {
+  for (const d of devices) {
     if (!d.id) continue;
     try {
       const body = new URLSearchParams({
@@ -112,15 +112,15 @@ async function setHoldDurations(token) {
 }
 
 // ── Gallery: find/create, remove duplicates, collect existing item IDs ────────
-async function prepareGallery(token) {
+async function prepareGallery(token, galleryName) {
   const all = await apiGet(token, '/user/galleries?count=1000');
   // Sort populated-first so dedup keeps the gallery WITH items, not an empty stray
   // that happened to sort first (the API order is arbitrary).
   const itemsOf = (g) => g.itemCount ?? g.imageCount ?? g.count ?? 0;
-  const matches = all.filter(g => g.name === mc.galleryName).sort((a, b) => itemsOf(b) - itemsOf(a));
+  const matches = all.filter(g => g.name === galleryName).sort((a, b) => itemsOf(b) - itemsOf(a));
 
   if (matches.length > 1) {
-    console.log(`Found ${matches.length} "${mc.galleryName}" galleries — keeping the populated one, removing duplicates`);
+    console.log(`Found ${matches.length} "${galleryName}" galleries — keeping the populated one, removing duplicates`);
     for (const g of matches.slice(1)) {
       await apiDelete(token, `/galleries/${g.id}`);
       console.log(`  deleted gallery ${g.id} (${itemsOf(g)} items)`);
@@ -130,11 +130,12 @@ async function prepareGallery(token) {
   let galleryId;
   if (matches.length >= 1) {
     galleryId = matches[0].id;
-    console.log(`Gallery "${mc.galleryName}" id: ${galleryId}`);
+    console.log(`Gallery "${galleryName}" id: ${galleryId}`);
   } else {
-    const { data } = await apiPost(token, '/galleries', { name: mc.galleryName, orientation: 'portrait' });
+    const res = await apiPost(token, '/galleries', { name: galleryName, orientation: 'portrait' });
+    const { data } = await res.json();
     galleryId = data.id;
-    console.log(`Created gallery "${mc.galleryName}" id: ${galleryId}`);
+    console.log(`Created gallery "${galleryName}" id: ${galleryId}`);
   }
 
   // Collect existing item IDs — we'll delete them after new content is pushed
@@ -164,13 +165,38 @@ async function clearOldItems(token, oldItemIds) {
 }
 
 // ── Screenshots via Puppeteer ─────────────────────────────────────────────────
-async function takeScreenshots(count) {
+async function waitForPortrait(page, portraitUrl) {
+  // goto can time out waiting for subresources even after an HTTP error page loaded.
+  let navigationResponse;
+  page.on('response', response => {
+    const request = response.request();
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) navigationResponse = response;
+  });
+  try {
+    navigationResponse = await page.goto(portraitUrl, { waitUntil: 'networkidle0', timeout: 30_000 });
+  } catch (err) {
+    if (err.name !== 'TimeoutError') throw err;
+    console.warn('  navigation timed out — waiting for portrait data');
+  }
+  function checkDocumentStatus() {
+    if (navigationResponse?.status() >= 400) throw new Error(`Portrait HTTP ${navigationResponse.status()}`);
+  }
+  checkDocumentStatus();
+  await page.waitForFunction(
+    () => document.body.dataset.ready === 'true',
+    { timeout: 15_000 }
+  ).catch(() => console.warn('  data-ready timeout'));
+  checkDocumentStatus();
+}
+
+async function takeScreenshots(count, mc) {
+  const portraitUrl = (mc.portraitUrl || 'http://localhost:3000') + '/portrait.html';
   let puppeteer;
   try { puppeteer = require('puppeteer-core'); }
   catch { try { puppeteer = require('puppeteer'); }
   catch { throw new Error('Install puppeteer or puppeteer-core: npm install puppeteer-core --save-dev'); } }
 
-  console.log(`Taking ${count} screenshot(s) of ${PORTRAIT_URL} ...`);
+  console.log(`Taking ${count} screenshot(s) of ${portraitUrl} ...`);
   const launchOpts = {
     headless: 'new',
     args: ['--no-sandbox', '--password-store=basic', '--disable-dev-shm-usage'],
@@ -183,11 +209,7 @@ async function takeScreenshots(count) {
     for (let i = 0; i < count; i++) {
       const page = await browser.newPage();
       await page.setViewport({ width: 1080, height: 1920, deviceScaleFactor: 1 });
-      await page.goto(PORTRAIT_URL, { waitUntil: 'networkidle0', timeout: 30_000 });
-      await page.waitForFunction(
-        () => document.body.dataset.ready === 'true',
-        { timeout: 15_000 }
-      ).catch(() => console.warn('  data-ready timeout — screenshotting anyway'));
+      await waitForPortrait(page, portraitUrl);
       const p = snapshotPath(i);
       await page.screenshot({ path: p, type: 'jpeg', quality: 92 });
       await page.close();
@@ -228,9 +250,9 @@ async function uploadItem(token, filePath, label) {
 // silently defeating the fresh postcard. (Caught in peer review, 2026-06-18.) The
 // cloud gallery is still kept populated by main() as a backup for if/when we switch
 // back to gallery mode, but it is not what's shown. Returns # of frames delivered.
-async function pushToDevices(postcardPath) {
+async function pushToDevices(postcardPath, devices) {
   let delivered = 0;
-  for (const device of mc.devices) {
+  for (const device of devices) {
     console.log(`\n--- ${device.name} (${device.ip}) ---`);
     try {
       const form = new FormData();
@@ -250,21 +272,21 @@ async function pushToDevices(postcardPath) {
 // copy (the stale-hoard); re-adding + sync re-pulls only the current items. Run
 // AFTER the normal push so the re-pull lands on fresh content. Heavier than a
 // normal sync (extra delete/sync round-trips), so it's once-a-night, not hourly.
-async function resyncDevices(token, galleryId) {
+async function resyncDevices(token, galleryId, devices) {
   console.log('\n=== Nightly full resync (purge stale local cache + re-pull) ===');
-  for (const device of mc.devices) {
+  for (const device of devices) {
     console.log(`\n--- ${device.name} (id: ${device.id}) ---`);
     try {
       // Purge step is best-effort: DELETE 400s if the gallery isn't attached to the
       // device (e.g. after a long cloud outage) — nothing to purge, go straight to add.
       try {
         await apiDelete(token, `/devices/${device.id}/galleries/${galleryId}`);
-        await fetch(`${API_BASE}/devices/${device.id}/sync`, { method: 'POST', headers: headers(token) });
+        await apiPost(token, `/devices/${device.id}/sync`);
         console.log('  ✓ gallery removed + purge sync');
         await sleep(8_000);   // let the frame act on the removal before re-adding
       } catch (e) { console.warn(`  purge skipped (gallery not attached?): ${e.message}`); }
-      await fetch(`${API_BASE}/devices/${device.id}/galleries/${galleryId}`, { method: 'POST', headers: headers(token) });
-      await fetch(`${API_BASE}/devices/${device.id}/sync`, { method: 'POST', headers: headers(token) });
+      await apiPost(token, `/devices/${device.id}/galleries/${galleryId}`);
+      await apiPost(token, `/devices/${device.id}/sync`);
       console.log('  ✓ gallery re-added + re-pull sync');
       await sleep(10_000);  // let the re-pull finish before forcing display
       await fetch(`http://${device.ip}/remote/control_command/change_gallery/${galleryId}/`, { signal: AbortSignal.timeout(10_000) });
@@ -289,7 +311,7 @@ async function sendHeartbeat(pushUrl, token, success, label) {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
-async function main() {
+async function main({ meural: mc, gatus: gatusCfg }, { capture = takeScreenshots, resync = RESYNC } = {}) {
   // Overlap guard: a hung cloud call plus the 15-min cron could otherwise stack two
   // runs racing on the same gallery. A lock older than 10 min is treated as stale.
   if (fs.existsSync(LOCK_FILE)) {
@@ -307,19 +329,16 @@ async function main() {
     console.log(`=== Meural Push (${COUNT} shots) ===\n`);
 
     console.log('Authenticating...');
-    const token = await getToken();
-    console.log('✓ Authenticated\n');
+    let token;
+    try {
+      token = await getToken(mc);
+    } catch (err) {
+      console.warn(`Authentication failed — continuing with local postcard: ${err.message}`);
+    }
+    // A changed previewDuration takes effect at the next frame boot.
+    if (token) await setHoldDurations(token, mc.devices);
 
-    // Pin display durations so the postcard holds (no 60s revert). Idempotent.
-    // NOTE: the frame only applies a changed previewDuration at its NEXT boot — a
-    // sync isn't enough and the device API readback always shows the saved value, so
-    // this can't be verified from here. A frame must be power-cycled once after the
-    // value first changes; thereafter this keeps it pinned against drift.
-    console.log('Pinning display durations...');
-    await setHoldDurations(token);
-    console.log();
-
-    snapPaths = await takeScreenshots(COUNT);
+    snapPaths = await capture(COUNT, mc);
     console.log();
 
     // Cloud gallery work runs NIGHTLY ONLY (the 22:00 tick, or a manual `resync` arg).
@@ -329,36 +348,27 @@ async function main() {
     // popping up all day (surfaced 2026-07-03, the day Meural's /items recovered; the
     // outage had been masking it). One backup upload a day is plenty: the postcard is
     // the display, the gallery is history. cloudOk: null = not probed this run.
-    let cloudOk = null;
-    let galleryId, oldItemIds;
-    if (RESYNC) {
-      ({ galleryId, oldItemIds } = await prepareGallery(token));
-      console.log();
-
-      // Meural's backend 500'd on every real image 6/15–7/3. Treat the FIRST upload as
-      // a probe: one failure = cloud is down, stop and let the postcard carry the run.
-      console.log('Probing cloud upload (1 failure → fall back to postcard)...');
-      let uploaded = 0;
-      for (let i = 0; i < snapPaths.length; i++) {
-        try {
-          const itemId = await uploadItem(token, snapPaths[i], `[${i + 1}/${snapPaths.length}]`);
-          await fetch(`${API_BASE}/galleries/${galleryId}/items/${itemId}`, {
-            method: 'POST', headers: headers(token), signal: AbortSignal.timeout(API_TIMEOUT),
-          }).catch((e) => console.warn(`  add to gallery: ${e.message}`));
+    let gallery;
+    let uploaded = 0;
+    if (resync && token) {
+      try {
+        gallery = await prepareGallery(token, mc.galleryName);
+        for (const [i, filePath] of snapPaths.entries()) {
+          const itemId = await uploadItem(token, filePath, `[${i + 1}/${snapPaths.length}]`);
+          await apiPost(token, `/galleries/${gallery.galleryId}/items/${itemId}`);
           uploaded++;
-        } catch (e) {
-          console.warn(`  cloud upload failed → postcard fallback: ${e.message.slice(0, 70)}`);
-          break;   // one failure = cloud down; don't hammer the remaining shots
         }
+      } catch (err) {
+        console.warn(`Cloud backup stopped; continuing with postcard: ${err.message.slice(0, 70)}`);
       }
-      cloudOk = uploaded > 0;
-      console.log(cloudOk
-        ? `✓ cloud is UP — ${uploaded} item(s) in gallery`
-        : '⚠ cloud down (Meural 500) — postcard is carrying the dashboard this run');
     }
+    const cloudOk = resync ? uploaded > 0 : null;
+    if (resync) console.log(cloudOk
+      ? `✓ cloud is UP — ${uploaded} item(s) in gallery`
+      : '⚠ cloud down — postcard is carrying the dashboard this run');
 
     // Postcard is the live display (always, cloud-independent). # frames that took it.
-    const delivered = await pushToDevices(snapPaths[0]);
+    const delivered = await pushToDevices(snapPaths[0], mc.devices);
     const framesOk = delivered === mc.devices.length;
     console.log(`\nFrames delivered: ${delivered}/${mc.devices.length}${framesOk ? '' : '  ⚠ a frame did NOT take the postcard'}`);
 
@@ -366,8 +376,8 @@ async function main() {
     // (These add/delete/sync events pop the frames off the postcard preview — fine
     // once a night at 22:00, when resync re-pins to the just-uploaded fresh image.)
     if (cloudOk) {
-      await clearOldItems(token, oldItemIds);
-      await resyncDevices(token, galleryId);
+      await clearOldItems(token, gallery.oldItemIds);
+      await resyncDevices(token, gallery.galleryId, mc.devices);
     }
 
     console.log('\n=== Done ===');
@@ -386,4 +396,8 @@ async function main() {
   }
 }
 
-main().catch(err => { console.error('\nFatal:', err.message); process.exit(1); });
+if (require.main === module) {
+  main(require('./config')).catch(err => { console.error('\nFatal:', err.message); process.exit(1); });
+}
+
+module.exports = { main, waitForPortrait };

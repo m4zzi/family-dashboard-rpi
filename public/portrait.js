@@ -11,16 +11,36 @@ function fmtTime(isoString, allDay) {
   const m = String(d.getMinutes()).padStart(2, '0');
   return m === '00' ? `${h} ${ampm}` : `${h}:${m} ${ampm}`;
 }
-function dayKey(isoString) {
-  const d = new Date(isoString);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+function groupEventsByDay(events, firstDay, windowEnd, fallbackDays = 14) {
+  // Older calendar responses omit windowEnd until the server has restarted.
+  const today = new Date();
+  const until = windowEnd ? Date.parse(windowEnd) : today.setDate(today.getDate() + fallbackDays);
+  const byDay = new Map();
+  const first = new Date(firstDay);
+  first.setHours(0, 0, 0, 0);
+  for (const ev of events) {
+    const start = new Date(ev.start);
+    const end = ev.end ? new Date(ev.end) : start;
+    // End is exclusive at midnight. A zero-duration event still occupies its start day.
+    const last = Math.min(until, end > start ? end.getTime() - 1 : start.getTime());
+    const day = new Date(Math.max(first, start));
+    day.setHours(0, 0, 0, 0);
+    for (; day <= last; day.setDate(day.getDate() + 1)) {
+      const key = localDateKey(day);
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key).push(ev);
+    }
+  }
+  return byDay;
 }
 function localDateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
 function dayHeading(dateKey) {
-  const today    = localDateKey(new Date());
-  const tomorrow = localDateKey(new Date(Date.now() + 86_400_000));
+  const date = new Date();
+  const today = localDateKey(date);
+  date.setDate(date.getDate() + 1);
+  const tomorrow = localDateKey(date);
   if (dateKey === today)    return 'Today';
   if (dateKey === tomorrow) return 'Tomorrow';
   const d = new Date(dateKey + 'T12:00:00');
@@ -56,7 +76,6 @@ async function loadPhotos() {
     }
   } catch (err) { console.warn('Photos unavailable:', err.message); }
 }
-loadPhotos();
 
 // ── Weather ──────────────────────────────────────────────────────────────────
 async function loadWeather() {
@@ -88,7 +107,6 @@ async function loadWeather() {
     console.warn('Weather unavailable:', err.message);
   }
 }
-loadWeather();
 
 // ── Birthdays ────────────────────────────────────────────────────────────────
 const birthdayBanner = document.getElementById('birthdayBanner');
@@ -121,7 +139,6 @@ async function loadBirthdays() {
     birthdayBanner.hidden = true;
   }
 }
-loadBirthdays();
 
 // ── Calendar events ──────────────────────────────────────────────────────────
 async function loadCalendar() {
@@ -129,26 +146,22 @@ async function loadCalendar() {
   try {
     const res = await fetch('/api/calendar');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { events } = await res.json();
+    const { events, error, windowEnd } = await res.json();
     container.innerHTML = '';
 
-    if (!events || events.length === 0) {
+    const byDay = groupEventsByDay(events || [], new Date(), windowEnd);
+    if (byDay.size === 0) {
       container.innerHTML = `<div class="day-heading today">Upcoming</div>
-        <div class="no-events">Nothing scheduled</div>`;
+        <div class="no-events">${error ? 'Calendar unavailable' : 'Nothing scheduled'}</div>`;
       return;
     }
 
-    const byDay = new Map();
-    for (const ev of events) {
-      const key = dayKey(ev.start);
-      if (!byDay.has(key)) byDay.set(key, []);
-      byDay.get(key).push(ev);
-    }
     const todayKey = localDateKey(new Date());
 
     // Show up to 3 days
     let dayCount = 0;
-    for (const [dateKey, dayEvents] of byDay) {
+    for (const dateKey of [...byDay.keys()].sort()) {
+      const dayEvents = byDay.get(dateKey);
       if (dayCount >= 3) break;
 
       const heading = document.createElement('div');
@@ -187,9 +200,9 @@ async function loadCalendar() {
     }
   } catch (err) {
     console.warn('Calendar unavailable:', err.message);
+    container.innerHTML = '<div class="no-events">Calendar unavailable</div>';
   }
 }
-loadCalendar();
 
 // ── Signal readiness for Puppeteer ───────────────────────────────────────────
 // Puppeteer can wait for this before screenshotting
