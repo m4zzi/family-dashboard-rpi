@@ -1,10 +1,9 @@
 # Family Dashboard for Raspberry Pi
 
-> **Deployment status review (2026-09-06):** `.2.164` and the frame addresses
-> below are the last documented Columbia targets. Newport Pi/frame operation has
-> not been established by the available records; verify the actual target before
-> deployment. [homelab architecture](../homelab/ARCHITECTURE.md) owns current
-> hosting decisions. This update does not change or deploy the application.
+> **Deployment status.** The Pi has run at the Monte Nido rental on `192.168.2.164`
+> since 2026-10-11, on Pacific time. Meural push resumed on 2026-11-21 for tissot-913
+> only. The other frame, whistler-341, is still packed. See the [Meural runbook](MEURAL.md).
+> [Homelab architecture](../homelab/ARCHITECTURE.md) owns current hosting decisions.
 >
 > **Secrets migration remains open:** the existing application reads `config.js`;
 > gitignore is not vault integration. Examples below describe that legacy mechanism.
